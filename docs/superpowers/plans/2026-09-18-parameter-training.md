@@ -1769,21 +1769,24 @@ def load_module(module_path: str) -> ModuleType:
         ) from exc
 ```
 
-Change `training.py`'s bridge import to carry both new names:
+`load_algorithms` calls `load_module`, so without it the module raises `NameError`
+on the first import rather than on the first call — which is the failure a
+collection error reports anyway, but fix it here rather than discovering it in
+Step 4. The import becomes exactly these two names:
 
 ```python
-from flagquantum_mcp_server._bridge import load_module, load_sdk, load_torch
+from flagquantum_mcp_server._bridge import load_module, load_sdk
 ```
 
-`load_algorithms` calls `load_module`, so without this the module raises
-`NameError` on the first import rather than on the first call — which is the
-failure a collection error reports anyway, but fix it here rather than
-discovering it in Step 4.
+`load_torch` is deliberately **not** added here: this task's code does not call
+it, `ruff`'s `F` selection makes an unused import an error, and Task 7 adds it in
+the same edit that first uses it. Do not write an import ahead of its use.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 17 tests.
+Expected: PASS, 20 tests. (Sixteen were there before this task; Step 1 adds four.
+Count them in the run's own output rather than trusting this number.)
 
 - [ ] **Step 5: Mutation-test the identity filter**
 
@@ -1822,7 +1825,7 @@ different way — that `"IX"` puts its `X` on wire 1 and not wire 0:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
-python3 - <<'PY'
+../.venv/bin/python - <<'PY'
 from flagquantum_mcp_server.training import hamiltonian_from_terms
 assert hamiltonian_from_terms([{"pauli": "IX"}], n_wires=2).terms[0].ops == ((1, "x"),), "IX is on the wrong wire"
 assert hamiltonian_from_terms([{"pauli": "XI"}], n_wires=2).terms[0].ops == ((0, "x"),), "XI is on the wrong wire"
@@ -1857,7 +1860,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k "refuses_the_expectation_builder" -q
-python3 -c "
+../.venv/bin/python -c "
 from flagquantum_mcp_server.training import hamiltonian_from_terms
 H = hamiltonian_from_terms([{'pauli': 'ZZ', 'coefficient': -1.0}, {'pauli': 'II', 'coefficient': 99.0}], n_wires=2)
 print('objective built with an all-identity term:', H)
@@ -2103,6 +2106,13 @@ from flagquantum_mcp_server.preconditions import (
     reject_circuit_observables,
 )
 ```
+
+This is the file's complete block, not this task's own additions. `load_module`
+and `validate_pauli_terms` are not called by `train_parameters`, but they are
+called by `load_algorithms` and `hamiltonian_from_terms`, which live in this
+same file — so they stay. `F401` is scoped to the file, not to the task, and a
+name used anywhere in the module is used. Do not prune this block by asking
+which names this task's new code calls.
 
 ```python
 def train_parameters(
