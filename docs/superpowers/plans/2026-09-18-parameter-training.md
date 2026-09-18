@@ -2156,7 +2156,7 @@ and a test that exists only in the file is one the next reader cannot check:
 
 ```python
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), 10**400])
-def test_a_non_finite_starting_value_is_refused(bad: float) -> None:
+def test_a_non_finite_starting_value_is_refused(bad: object) -> None:
     """A starting value that is not a finite real reaches the optimizer otherwise.
 
     Measured: without this refusal, ``values={"t0": nan}`` returns
@@ -2172,6 +2172,11 @@ def test_a_non_finite_starting_value_is_refused(bad: float) -> None:
 
     assert "t0" in str(caught.value)
 ```
+
+``bad: object`` rather than ``bad: float``, because the third case is an ``int``
+and the first two are floats; ``object`` is the honest annotation, and it matches
+the learning-rate test. mypy runs on ``src`` only, so no gate would catch the
+wrong one.
 
 All three cases are here on purpose and none is redundant. ``nan`` and ``inf``
 exercise the ``isfinite`` test; ``10**400`` exercises the ``OverflowError`` it
