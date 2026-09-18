@@ -324,40 +324,70 @@ def test_the_gate_term_is_the_coefficient_times_instructions_times_state() -> No
 def test_the_prediction_over_predicts_every_point_it_was_calibrated_from() -> None:
     """The model's only job is to be an upper bound, so this is the whole test.
 
-    Measured per-step costs, warm, from the design's table. A model that
-    under-predicts anywhere here declines to protect the caller exactly where
-    the caller most needs it.
+    Measured per-step costs, warm, min of three runs, from the design's tables. A
+    model that under-predicts anywhere here declines to protect the caller
+    exactly where the caller most needs it.
 
-    The table runs from 1 instruction to 188, not just over the one-layer
-    ansatz, and the low rows are the ones that carry the fixed cost: a flat
-    per-step floor covers them by accident at four wires and by 105x too little
-    at twenty-two, so a table of only the 35-to-71-instruction circuits cannot
-    tell a state term that is present from one that is missing. The failure this
-    test was written for — a 24-wire, one-gate circuit admitted for 35 steps and
-    taking 438 s — lived entirely in the rows that were absent.
+    The first sixteen rows run from 1 instruction to 188, not just over the
+    one-layer ansatz, and the low rows are the ones that carry the fixed cost: a
+    flat per-step floor covers them by accident at four wires and by 105x too
+    little at twenty-two, so a table of only the 35-to-71-instruction circuits
+    cannot tell a state term that is present from one that is missing. The
+    failure those rows were added for — a 24-wire, one-gate circuit admitted for
+    35 steps and taking 438 s — lived entirely in the rows that were absent.
+
+    The last five rows are the axis this round added, and they are the same
+    lesson one axis over: every one of the first sixteen is either small-width
+    with few instructions (where the floor governs) or large-width (where the
+    state or gate term governs), and **none is small-width with many
+    instructions**. The three-term model predicted its 0.02 s floor at all five
+    of the new points; the truth runs to 0.223 s per step at two wires with 4000
+    instructions, and the budget admitted 2975 steps of that — 664 s of work
+    against a 60 s budget. Each new row was measured in the same way as the
+    rest, and each was checked not to be a floor row: what it pins is the
+    per-instruction dispatch term.
+
+    Those five are built by ``_wide_qir`` rather than by ``_ansatz_tail_qir``,
+    because the ansatz spells a parameter name per layer and its 4000-instruction
+    payload is 285 KB — past the byte bound, so ``resolve_ir`` refuses it before
+    the budget is ever consulted and the row could not be measured through the
+    tool at all. ``_wide_qir`` names each angle by its position, which is what a
+    caller would write and what keeps the payload inside the bound.
     """
     from flagquantum_mcp_server.training import STARTUP_SECONDS, predict_seconds
 
     measured = [
-        (4, 11, 0.0018),
-        (8, 23, 0.0041),
-        (12, 35, 0.0090),
-        (13, 38, 0.0155),
-        (14, 41, 0.0207),
-        (15, 44, 0.0421),
-        (16, 47, 0.0852),
-        (16, 188, 0.1470),
-        (16, 3, 0.0280),
-        (20, 1, 0.3019),
-        (20, 3, 0.308),
-        (20, 59, 1.2900),
-        (22, 1, 2.1049),
-        (22, 65, 8.5600),
-        (24, 1, 12.5252),
-        (24, 4, 13.1363),
+        (_ansatz_tail_qir, 4, 11, 0.0018),
+        (_ansatz_tail_qir, 8, 23, 0.0041),
+        (_ansatz_tail_qir, 12, 35, 0.0090),
+        (_ansatz_tail_qir, 13, 38, 0.0155),
+        (_ansatz_tail_qir, 14, 41, 0.0207),
+        (_ansatz_tail_qir, 15, 44, 0.0421),
+        (_ansatz_tail_qir, 16, 47, 0.0852),
+        (_ansatz_tail_qir, 16, 188, 0.1470),
+        (_ansatz_tail_qir, 16, 3, 0.0280),
+        (_ansatz_tail_qir, 20, 1, 0.3019),
+        (_ansatz_tail_qir, 20, 3, 0.308),
+        (_ansatz_tail_qir, 20, 59, 1.2900),
+        (_ansatz_tail_qir, 22, 1, 2.1049),
+        (_ansatz_tail_qir, 22, 65, 8.5600),
+        (_ansatz_tail_qir, 24, 1, 12.5252),
+        (_ansatz_tail_qir, 24, 4, 13.1363),
+        # Small width, many instructions: the five the dispatch term governs.
+        # Each value is the smallest of three runs, the convention the table
+        # above uses. Repeated runs of one of these circuits on one machine
+        # spread by up to 1.9x — 0.1260 s against 0.2420 s per step at four wires
+        # with 2500 instructions — which is why the coefficient is sized against
+        # the worst observation rather than against these best ones; see
+        # `test_the_dispatch_term_is_what_covers_a_narrow_circuit_with_many_instructions`.
+        (_wide_qir, 2, 4000, 0.2232),
+        (_wide_qir, 4, 2500, 0.1260),
+        (_wide_qir, 6, 1500, 0.0795),
+        (_wide_qir, 8, 2500, 0.1352),
+        (_wide_qir, 8, 4000, 0.2210),
     ]
-    for n_wires, instructions, per_step in measured:
-        ir = _ir(json.dumps(_ansatz_tail_qir(n_wires, instructions)))
+    for build, n_wires, instructions, per_step in measured:
+        ir = _ir(json.dumps(build(n_wires, instructions)))
         # The table names a width and an instruction count and the model reads
         # both, so both are checked: a circuit that quietly came out three wires
         # wide would measure the state term at the wrong power of two and pass
@@ -388,6 +418,44 @@ def test_the_floor_is_what_covers_the_smallest_width() -> None:
     ir = _ir(json.dumps(_layered_qir(4)))
 
     assert predict_seconds(ir, 1) - STARTUP_SECONDS == pytest.approx(MIN_STEP_SECONDS)
+
+
+def test_the_dispatch_term_is_what_covers_a_narrow_circuit_with_many_instructions() -> None:
+    """The point the three-term model got wrong, asserted from three sides.
+
+    ``test_the_gate_term_is_the_coefficient_times_instructions_times_state``
+    reads its coefficient back from the module, so it pins the *shape* of the
+    gate term and passes under any mutation of its value — including one that
+    makes the model a hundred times more conservative, which nothing else would
+    catch either. This one names a width and an instruction count where the
+    three-term model predicted its floor, and pins the prediction, the term that
+    lifts it, and the measurement it has to clear.
+
+    Measured: four wires with 2500 instructions cost 0.126 s per step at best and
+    0.242 s at worst over three runs of the same circuit. Under the three-term
+    model the prediction was the 0.02 s floor, so the 60-second budget admitted
+    (60 - 0.5) / 0.02 = 2975 steps — between 375 and 720 seconds of work. The
+    worst observation is what the last assertion compares against, not the best:
+    a term sized against the best run of a circuit is not an upper bound on the
+    machine.
+    """
+    from flagquantum_mcp_server.training import (
+        DISPATCH_COST,
+        MIN_STEP_SECONDS,
+        STARTUP_SECONDS,
+        predict_seconds,
+    )
+
+    ir = _ir(json.dumps(_wide_qir(4, 2500)))
+    per_step = predict_seconds(ir, 1) - STARTUP_SECONDS
+
+    # The half the old model fails: at this point it was the floor.
+    assert per_step > MIN_STEP_SECONDS
+    # The term that lifts it, at the coefficient's own value — so a constant
+    # moved by orders of magnitude either way still reds here.
+    assert per_step == pytest.approx(len(ir.instructions) * DISPATCH_COST)
+    # The half that protects the caller: above the worst run, not just the best.
+    assert per_step > 0.2420
 
 
 def test_the_prediction_is_computed_without_running_anything() -> None:
@@ -442,6 +510,37 @@ def _ansatz_tail_qir(n_wires: int, instructions: int) -> list[dict[str, object]]
     per_layer = 3 * n_wires - 1
     layers = -(-instructions // per_layer)
     return _layered_qir(n_wires, layers)[-instructions:]
+
+
+def _wide_qir(n_wires: int, instructions: int) -> list[dict[str, object]]:
+    """A repeating ry/cx block, every angle its own parameter, named by position.
+
+    Used for the calibration rows on the small-width/many-instruction axis. The
+    ansatz above it spells one name per layer — ``u799_0`` — so its payload at
+    four thousand instructions is 285 KB and ``resolve_ir`` refuses it on the
+    byte bound before the budget is consulted at all: the row could not be
+    measured through the tool, which is how the first version of this table
+    failed.
+
+    Naming each angle by its position is what brings the payload inside the
+    bound, and it is also the shape a caller writes. The width still comes from
+    the wires the gates touch, and the block touches every wire, so a truncated
+    tail is still a circuit of the requested width.
+    """
+    gates: list[dict[str, object]] = []
+    index = 0
+    while len(gates) < instructions:
+        for wire in range(n_wires):
+            gates.append(
+                {
+                    "name": "ry",
+                    "index": [wire],
+                    "parameters": {"theta": {"$parameter": f"p{index}"}},
+                }
+            )
+            index += 1
+        gates.extend({"name": "cx", "index": [wire, wire + 1]} for wire in range(n_wires - 1))
+    return gates[:instructions]
 
 
 # --- the objective ---
@@ -717,6 +816,37 @@ def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
 # --- the refusals that matter ---
 
 
+def test_a_rate_the_optimizer_overflows_is_not_blamed_on_the_circuit() -> None:
+    """The refusal names what the caller can change, not what they cannot.
+
+    Measured before the fix: ``learning_rate=1e300`` is finite and positive, so
+    it passes the guard, overflows inside the SDK's first update, and the caller
+    was told "The most common cause is a circuit whose builder cannot be traced
+    — Module requires static topology, so a gate list or an IR payload built
+    from one always satisfies it." Every clause of that is unusable: a replayed
+    gate list is one loop over a fixed instruction list, so the cause it names
+    cannot arise from this tool's inputs at all.
+
+    The boundary is measured and independent of the circuit: this same circuit
+    with this same payload trains normally at 1e37 and reaches the SDK failure
+    at 1e38, and the failing rate does not move across widths or across starting
+    values. Both halves are asserted, because "not the circuit" is the claim.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    trained = train_parameters(ANGLED, TFIM2, "qir", steps=1, learning_rate=1e37)
+    assert trained["status"] == "success", trained
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", steps=1, learning_rate=1e38)
+
+    message = str(caught.value)
+    assert "learning_rate" in message
+    assert "builder" not in message
+    assert "cannot be traced" not in message
+    assert "circuit whose" not in message
+
+
 def test_a_circuit_with_no_parameters_is_refused_by_name() -> None:
     from flagquantum_mcp_server.training import train_parameters
 
@@ -751,6 +881,15 @@ def test_an_empty_hamiltonian_is_refused() -> None:
     # does its one job, and would keep passing if it never did.
     assert "hamiltonian" in message
     assert "'terms'" not in message
+    # And no argument named as something to pass. The message used to end "for a
+    # single unweighted term pass 'pauli' instead" — a noun this tool has no
+    # argument for, and the one leak the property test above cannot see, because
+    # 'pauli' is legitimate elsewhere in these refusals (it is the key a caller
+    # writes inside a term). Pinned on the message it leaked from, and phrased as
+    # the *instruction*, since an unqualified ban on the word is a ban on
+    # correct code.
+    assert "pass" not in message
+    assert "'pauli'" not in message
 
 
 def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
@@ -783,14 +922,45 @@ def test_a_starting_value_that_is_not_a_number_is_refused() -> None:
     assert "t0" in str(caught.value)
 
 
-@pytest.mark.parametrize("steps", [0, -1, 1.5, True, "10"])
+@pytest.mark.parametrize("steps", [0, -1, 1.5, True, "10", 10**400])
 def test_a_step_count_the_loop_cannot_use_is_refused(steps: object) -> None:
+    """``10**400`` is in this list because ``steps`` is the one guard a caller can
+    reach with it: ``steps`` is typed ``integer``, so pydantic passes a 400-digit
+    int straight through, while ``values`` and ``learning_rate`` are typed
+    ``number`` and are rejected by the schema before any guard runs. Measured
+    before the fix, through the tool: ``steps=10**400`` came back as
+    ``INTERNAL_ERROR: OverflowError: int too large to convert to float`` — a
+    "we broke" for a number the caller typed.
+    """
     from flagquantum_mcp_server.training import train_parameters
 
     with pytest.raises(ToolInputError) as caught:
         train_parameters(ANGLED, TFIM2, "qir", steps=steps)
 
     assert "steps" in str(caught.value)
+
+
+def test_a_coefficient_no_float_can_hold_is_refused_by_its_position() -> None:
+    """The same escape the step count had, one module over.
+
+    ``coefficient`` is typed ``number`` in the schema, so a JSON integer literal
+    of 400 digits arrives as a Python ``int``; typed ``10**400`` through the tool
+    it came back as ``INTERNAL_ERROR: OverflowError: int too large to convert to
+    float``, from the ``float(coefficient)`` the shared validator ends with. The
+    validator is in ``planning.py``, which is where the guard belongs now that
+    both the ``expectation`` path and the training objective go through it, and
+    its refusal names the term's position the way its neighbours do.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": 10**400}], "qir", steps=1)
+
+    message = str(caught.value)
+    assert caught.value.code == "INVALID_INPUT", message
+    assert "hamiltonian[0]" in message
+    assert "coefficient" in message
+    assert "terms" not in message
 
 
 def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -> None:
@@ -822,8 +992,54 @@ def test_no_refusal_from_this_tool_says_a_noun_the_caller_did_not_write() -> Non
     because phrase-by-phrase is exactly what let the first version miss the
     term-level refusals — it replaced the quoted field name, and ``terms[0]``
     is unquoted.
+
+    This round widened the *nouns* from two to the sibling request's whole field
+    vocabulary, derived from ``planning`` rather than listed here, because the
+    two it carried could not see the leak that was live in this tool: the
+    empty-objective refusal used to say "for a single unweighted term pass
+    'pauli' instead", and ``train_parameters_tool`` has no such argument.
+
+    **And it searches for each noun in the position a refusal writes a field in,
+    not as a bare word.** The first version of the widening searched for plain
+    text, and red on correct code: ``name`` is a key of an ``expectation``
+    request and also an ordinary English verb, so "Drop the term, or name a wire
+    it acts on" matched it. A word-boundary search over English prose cannot tell
+    a field from a word, and the repair is not to subtract words one at a time —
+    that is a list nobody finishes. A refusal writes a field the way a caller
+    would have to type it: quoted (``'terms' is empty``) or subscripted
+    (``terms[0] has no 'pauli' string``). Both forms are what this searches for,
+    which is the whole check and needs no exemption list.
+
+    ``'pauli'`` and ``'coefficient'`` are the two keys a caller of *this* tool
+    does write inside a term — the tool's documentation spells a term
+    ``{"pauli": ..., "coefficient": ...}`` — so they are subtracted from the
+    derived set for the field-position check: a message naming them is the
+    caller's own words, and ``hamiltonian[0] has no 'pauli' string`` is correct
+    code. Measured: without that subtraction this loop reds on it.
+
+    The second check is what those two are not subtracted from, and it is the
+    one that catches the leak this round fixed. Naming a sibling field as
+    something to *pass* is a different act from mentioning it: the leak read
+    "for a single unweighted term pass 'pauli' instead", which is an instruction
+    to use an argument ``train_parameters_tool`` does not have, and none of the
+    statements above read that way. So the sibling vocabulary is also searched
+    for the three phrasings that offer a field as an alternative — ``pass 'x'``,
+    ``use 'x'``, ``'x' instead`` — which is the shape of the defect rather than
+    the shape of the noun. Measured, with the wording reverted: this loop reds on
+    ``pass 'pauli'``, and the field-position loop above does not.
     """
+    from flagquantum_mcp_server.planning import EXPECTATION_KEYS, TERM_KEYS
     from flagquantum_mcp_server.training import train_parameters
+
+    # An 'expectation' request's own keys, plus the names around it that belong
+    # to that path and not to this tool: the request's own name, and the argument
+    # its tool takes. Derived, so a key added to an expectation request is
+    # covered by this loop without anyone remembering to add it here.
+    sibling_nouns = sorted(EXPECTATION_KEYS | {"expectation", "outputs"})
+    # The two keys this tool's own term shape shares with the sibling's. They are
+    # fields a caller may legitimately be told about; they are not arguments
+    # either tool offers in place of the other's.
+    this_tools_term_keys = set(TERM_KEYS)
 
     malformed = [
         None,
@@ -841,8 +1057,25 @@ def test_no_refusal_from_this_tool_says_a_noun_the_caller_did_not_write() -> Non
             train_parameters(ANGLED, objective, "qir", steps=1)
         message = str(caught.value)
         assert "hamiltonian" in message, (objective, message)
-        assert "terms" not in message, (objective, message)
-        assert "expectation" not in message, (objective, message)
+        # A field, in either of the two positions a refusal writes one in. The
+        # message is printed with the failure so a reader sees which noun and
+        # where, rather than having to reproduce it.
+        for noun in sibling_nouns:
+            if noun in this_tools_term_keys:
+                continue
+            for spelled in (f"'{noun}'", f'"{noun}"', f"{noun}["):
+                assert spelled not in message, (
+                    f"{objective}: the refusal writes {spelled!r}, a field a caller of "
+                    f"this tool never wrote: {message}"
+                )
+        # A field offered as an argument, which is the same defect whatever the
+        # noun. This is the half that catches the one this round removed.
+        for noun in sibling_nouns:
+            for spelled in (f"pass '{noun}'", f"use '{noun}'", f"'{noun}' instead"):
+                assert spelled not in message, (
+                    f"{objective}: the refusal offers {spelled!r}, an argument this tool "
+                    f"does not take: {message}"
+                )
 
 
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(

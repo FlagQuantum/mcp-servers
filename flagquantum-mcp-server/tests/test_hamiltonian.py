@@ -189,6 +189,24 @@ def test_a_coefficient_that_is_not_a_number_is_refused(coefficient: object) -> N
     assert "coefficient" in message
 
 
+def test_a_coefficient_no_float_can_hold_is_refused() -> None:
+    """The same guard the training tool has, reached from the expectation path.
+
+    Measured through this path before the fix: a coefficient of ``10**400`` came
+    back as ``INTERNAL_ERROR: OverflowError: int too large to convert to float``
+    from the ``float(coefficient)`` at the end of the shared validator. The guard
+    belongs in that validator rather than in either caller, because both reach
+    it, and this asserts on this side of the sharing.
+    """
+    with pytest.raises(ToolInputError) as caught:
+        _run([{"pauli": "ZZ", "coefficient": 10**400}])
+
+    message = str(caught.value)
+    assert caught.value.code == "INVALID_INPUT", message
+    assert "terms[0]" in message
+    assert "coefficient" in message
+
+
 def test_an_unknown_key_in_a_term_is_refused() -> None:
     """A misspelled key is a caller who meant something, not noise to drop."""
     with pytest.raises(UnsupportedFormatError) as caught:

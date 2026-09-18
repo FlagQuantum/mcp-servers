@@ -37,7 +37,7 @@ has configured a Qiskit MCP server already knows how to configure ours.
    | --- | --- | --- |
    | 1 | The frozen `stable_exports` snapshot | Strongest; each name has a verification test upstream |
    | 2 | `flagquantum.compiler` (documented `__all__`, not in the snapshot) | Public, but not frozen |
-   | 3 | Public names a package declares in its own `__all__` (`flagquantum.core`, `flagquantum.drawer`) and the two emitters | Weakest; must be pinned by a test here |
+   | 3 | Public names a package declares in its own `__all__` (`flagquantum.core`, `flagquantum.drawer`, `flagquantum.algorithms.{Hamiltonian, pauli_term}`) and the two emitters | Weakest; must be pinned by a test here |
 
    Anything else — planner internals, executor internals, anything reachable
    only by a private path — is off limits. A private import in this repository
@@ -61,10 +61,16 @@ has configured a Qiskit MCP server already knows how to configure ours.
    `execution_path: local_statevector` / `platform_provider: pytorch_cpu` on
    the result. It is also the one tool that must not be read as evidence about
    hardware, so its result carries the SDK's `accuracy.metric == "not_measured"`
-   and the run's `release_gate_allowed: false` rather than a summary that drops
-   them. FlagQuantum's ARCH-001 draws the same boundary from the other side:
-   direct in-process resources are *Compute*/*Simulation*, and credentials and
-   submission belong to *Remote*, which this server does not touch.
+   rather than a summary that drops it. Measured, the result is
+   `{execution, outputs, status}` and its `accuracy` block has five fields
+   (`version, metric, value, tolerance, passed`) — no `provenance` key and no
+   `release_gate_allowed` anywhere in it. That second name belongs to the
+   *plan*: `plan_execution_tool`'s `summary` carries
+   `release_gate_allowed: false` for the same circuit, and it is the plan's
+   field, not the result's. FlagQuantum's ARCH-001 draws the same boundary from
+   the other side: direct in-process resources are *Compute*/*Simulation*, and
+   credentials and submission belong to *Remote*, which this server does not
+   touch.
 
    `train_parameters_tool` is inside the same line. The gradients it uses are
    the SDK's exact gradients for a statevector simulation, computed in this

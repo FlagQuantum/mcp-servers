@@ -42,7 +42,6 @@ input, so a prediction decides before any work starts. See ``predict_seconds``.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -62,6 +61,7 @@ from flagquantum_mcp_server.errors import (
 from flagquantum_mcp_server.planning import validate_pauli_terms
 from flagquantum_mcp_server.preconditions import (
     SDK_FAILURE_BASES,
+    is_finite_number,
     plain,
     reject_circuit_observables,
 )
@@ -290,54 +290,99 @@ def load_algorithms() -> Any:
     return load_module("flagquantum.algorithms")
 
 
-# The budget model's constants. Calibrated from warm per-step measurements at 4,
-# 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits, over circuits from 1 to 188
-# instructions; the table is in the design document and every point is pinned by
-# a test. The model over-predicts at all sixteen points, by 1.9x at the worst.
+# The budget model's constants. Calibrated from warm per-step measurements at 2,
+# 4, 6, 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits, over circuits from 1 to
+# 4000 instructions; the tables are in the design document, and every calibration
+# point is pinned by a test. The model over-predicts at all twenty-one points, by
+# 1.9x at the worst.
 #
-# Three costs, each of them one that was measured rather than assumed:
+# Four costs, each of them one that was measured rather than assumed:
 STARTUP_SECONDS = 0.5
-MIN_STEP_SECONDS = 0.02  # dispatch, for circuits too small for either term below
+MIN_STEP_SECONDS = 0.02  # dispatch, for circuits too small for any term below
 STATE_COST = 1.5e-6  # per step per amplitude: holding the state
 GATE_COST = 1e-7  # per step per amplitude per instruction: applying gates
+# Per step per instruction: one gate's Python dispatch, paid whatever the width
+# and therefore invisible to both terms above. Measured warm as the slope of wall
+# time against step count, min of three runs. Two circuit shapes were measured,
+# so that the term does not follow one generator: the calibration test's ansatz
+# tail (3.0e-5 to 5.2e-5 s per instruction over its 4-to-8-wire rows) and its
+# wide rows (5.0e-5 to 5.6e-5 at 2 wires with 4000 instructions, 4 with 2500, 6
+# with 1500, 8 with 2500 and 8 with 4000 — the five points this term governs).
+# The figure is flat in width across both, which is why this is a constant and
+# not a power of two, and flat in circuit shape to within the noise.
+#
+# That noise is the reason for the coefficient's size rather than the mean of
+# those numbers. Repeated runs of one circuit on one machine differed by up to
+# 1.9x — 0.1260 s against 0.2420 s per step at 4 wires with 2500 instructions,
+# i.e. 5.0e-5 against 9.7e-5 s per instruction — so the *range* the term has to
+# cover is 5.0e-5 to 9.7e-5, not the minimum. This value clears the largest
+# single observation anywhere on the axis by 2.1x and the smallest by 4x, and it
+# is the only term covering this axis at all: under-predicting here is what let
+# a 4000-instruction two-wire circuit be admitted for 2975 steps, 664 s of work
+# against a 60 s budget.
+DISPATCH_COST = 2e-4
 
 
 def predict_seconds(ir: Any, steps: int) -> float:
     """Predict how long ``steps`` updates will take, in seconds.
 
-    Three terms, because cost has three regimes. ``STARTUP_SECONDS`` is the
+    Four terms, because cost has four regimes. ``STARTUP_SECONDS`` is the
     one-time ``make_fx`` trace ``Module`` performs when it first compiles the
-    builder. The other two are paid on every step: ``STATE_COST`` per amplitude
-    for holding a state of ``2 ** n_wires``, and ``GATE_COST`` per amplitude per
-    instruction for applying gates against it. They are separate terms because
-    they were measured to be: at twenty-four wires a single gate costs 12.5 s per
-    step, which is 7.5x what one instruction explains, and a single
-    width-independent floor could not see that cost at all.
+    builder. The other three are paid on every step: ``STATE_COST`` per amplitude
+    for holding a state of ``2 ** n_wires``, ``GATE_COST`` per amplitude per
+    instruction for applying gates against it, and ``DISPATCH_COST`` per
+    instruction for the Python cost of building the gate at all. They are
+    separate terms because they were measured to be: at twenty-four wires a
+    single gate costs 12.5 s per step, which is 7.5x what one instruction
+    explains, and a single width-independent floor could not see that cost at
+    all.
 
-    The floor sits under both. It is generous on purpose: 20 ms where 1.8 ms was
-    measured at four qubits, which at the default 60-second budget is the
-    difference between a caller being allowed three thousand steps and thirty
+    The floor sits under all three. It is generous on purpose: 20 ms where
+    1.8 ms was measured at four qubits, which at the default 60-second budget is
+    the difference between a caller being allowed three thousand steps and thirty
     thousand. Three thousand is already more than anyone reads, and a model that
-    is an upper bound everywhere is worth more than one that is tight at the
-    bottom.
+    is an upper bound at every point it was calibrated from is worth more than
+    one that is tight at the bottom.
+
+    ``DISPATCH_COST`` is the term that was missing until this round, and it was
+    missing along an axis none of the first sixteen calibration points could see:
+    each of them was either small-width with few instructions, where the floor
+    governs, or large-width, where the state or gate term governs. **None was
+    small-width with many instructions.** Measured there, the extremes are worse
+    than the shape suggested: a 2500-instruction four-wire circuit costs 0.126 s
+    per step where the three-term model predicted the 0.02 s floor, and a
+    4000-instruction two-wire circuit costs 0.223 s per step, also against the
+    floor. The budget admitted 2975 steps of each — 375 s and 664 s of work
+    against a 60 s budget. The design document states the rule this broke in its
+    own words: a calibration table that omits an axis cannot constrain the model
+    along it.
+
+    The dispatch term governs over roughly two to eleven wires: above that the
+    gate term is larger, so this cannot turn an under-prediction into an
+    over-refusal at the width of any point the other sixteen rows cover. Those
+    sixteen predictions are unchanged by it, which the test asserts directly
+    rather than leaving to arithmetic.
 
     A single coefficient cannot follow the true curve either, which falls from
     1.0e-5 per instruction-state at four qubits to 2.1e-8 at twenty and rises
     again to 5.7e-8 at twenty-four as the state stops fitting where it used to.
-    The first two are measured points in the sixteen-row calibration table; the
-    third is the design document's own 24-wire, 71-instruction measurement,
-    68.5 s per step, and is not one of the sixteen. ``GATE_COST`` clears the
-    highest point rather than the average one.
+    The first two are measured points in the twenty-one-row calibration table;
+    the third is the design document's own 24-wire, 71-instruction measurement,
+    68.5 s per step, and is not one of the twenty-one. ``GATE_COST`` clears the
+    highest point rather than the average one, and this round does not change it.
 
-    Where that leaves the margin, over the sixteen points it was calibrated at:
-    11x at four qubits, 4.9x at eight and 2.2x at twelve, the three widths where
-    the floor is doing all the work; between 1.9x and 8.4x at the other thirteen,
-    thinnest at twenty-four wires with four instructions and thickest at sixteen
-    wires with four layers. The thinnest matters least, because the budget admits
-    almost nothing there: the state term alone is 25.2 s per step at twenty-four
-    wires, so no circuit at that width gets more than two steps, and the full
-    ansatz there, 119.1 s per step, gets none at all. Twenty-two wires costs
-    6.3 s per step, and a one-gate circuit at that width gets nine.
+    Where that leaves the margin, over the twenty-one points it is calibrated at:
+    11x at four qubits with eleven instructions, 4.9x at eight and 2.2x at
+    twelve, the three widths where the floor is doing all the work; between
+    1.9x and 8.4x at the thirteen the state or gate term governs, thinnest at
+    twenty-four wires with four instructions and thickest at sixteen wires with
+    four layers; and 2.1x to 4.0x at the five the dispatch term governs, the ones
+    this round added, measured for the margin against the noisiest single run of
+    each rather than its best. The thinnest matters least, because the budget
+    admits almost nothing there: the state term alone is 25.2 s per step at
+    twenty-four wires, so no circuit at that width gets more than two steps, and
+    the full ansatz there, 119.1 s per step, gets none at all. Twenty-two wires
+    costs 6.3 s per step, and a one-gate circuit at that width gets nine.
 
     Args:
         ir: A validated ``CircuitIR``.
@@ -351,6 +396,7 @@ def predict_seconds(ir: Any, steps: int) -> float:
         MIN_STEP_SECONDS,
         2.0 ** int(ir.n_wires) * STATE_COST,  # holding the state
         len(ir.instructions) * 2.0 ** int(ir.n_wires) * GATE_COST,  # applying gates
+        len(ir.instructions) * DISPATCH_COST,  # building each gate
     )
     return STARTUP_SECONDS + steps * per_step
 
@@ -426,10 +472,17 @@ def train_parameters(
         final_loss, execution = _final_loss(module, torch)
     except SDK_FAILURE_BASES as exc:
         raise ToolInputError(
-            f"The SDK could not train this circuit: {exc}. The most common "
-            "cause is a circuit whose builder cannot be traced — Module "
-            "requires static topology, so a gate list or an IR payload built "
-            "from one always satisfies it."
+            f"The SDK could not complete this training run: {exc}. The SDK "
+            "raised this inside the run rather than a check here refusing it "
+            "before the run: the circuit, the objective, the starting values "
+            "and the step count had all been accepted. 'learning_rate' is the "
+            "argument to look at — measured on this SDK, a four-wire circuit "
+            "trains normally at 1e37 and reaches this line at 4e37, and the "
+            "boundary is float32's maximum divided by ten whether the circuit "
+            "is two wires wide or six, so it is the rate being converted "
+            "rather than the state being held. The circuit is not the "
+            "candidate: what this tool hands the SDK is a single loop over the "
+            "instruction list you sent, which always traces."
         ) from exc
 
     return {
@@ -449,33 +502,20 @@ def train_parameters(
     }
 
 
-def _is_finite_number(value: int | float) -> bool:
-    """Is this a finite real, without raising on one too large to be a float?
-
-    ``math.isfinite`` raises ``OverflowError`` on an ``int`` bigger than a float
-    can hold, which a JSON integer literal can be — ``json.loads("1" + "0"*400)``
-    is a perfectly ordinary Python int. Measured: without this, such a value
-    escapes the guard as an ``OverflowError`` and reaches the client as an
-    internal error instead of a refusal naming the argument. Pinned by the
-    ``10**400`` case in `test_a_learning_rate_adam_cannot_use_is_refused`.
-
-    Args:
-        value: A number already known to be an ``int`` or a ``float``.
-
-    Returns:
-        True if it is finite.
-    """
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
-
-
 def _check_steps(steps: Any) -> None:
     """Reject a step count the loop cannot use.
 
     The SDK refuses ``steps < 1`` too, with ``fq.train() steps must be a positive
     integer``. Caught here so the message names the argument the caller wrote.
+
+    Two things are wrong with a count that is merely positive, and this is the
+    only one of the tool's three numeric guards a client can reach with a value
+    no float holds: ``steps`` is typed ``integer``, so pydantic hands it a
+    ``10**400`` unchanged, while ``values`` and ``learning_rate`` are typed
+    ``number`` and never get that far. Measured through the tool: without this
+    check the count escapes as ``OverflowError: int too large to convert to
+    float``, and the client sees an ``INTERNAL_ERROR`` that names no argument
+    instead of a refusal naming ``steps``.
 
     Args:
         steps: The caller's step count.
@@ -483,32 +523,43 @@ def _check_steps(steps: Any) -> None:
     Raises:
         ToolInputError: If it is not a positive integer.
     """
-    if isinstance(steps, bool) or not isinstance(steps, int) or steps < 1:
+    if (
+        isinstance(steps, bool)
+        or not isinstance(steps, int)
+        or not is_finite_number(steps)
+        or steps < 1
+    ):
         raise ToolInputError(
             f"steps must be a positive integer; received {steps!r}. A loop that "
-            "runs zero times changes nothing and would still report success."
+            "runs zero times changes nothing and would still report success, and "
+            "a count too large to be a float overflows before the first step."
         )
 
 
 def _check_learning_rate(learning_rate: Any) -> None:
     """Reject a learning rate Adam cannot use.
 
+    Finiteness is part of the rule rather than an extra: ``nan <= 0`` is false,
+    so the positivity test alone lets ``nan`` through, and Adam then refuses it
+    with a ``ValueError`` that is not one of ``SDK_FAILURE_BASES``. The name in
+    this docstring is the one the message below uses, because a rule with two
+    names is a rule a reader has to reconcile.
+
     Args:
         learning_rate: The caller's learning rate.
 
     Raises:
-        ToolInputError: If it is not a positive real number.
+        ToolInputError: If it is not a positive finite number.
     """
     if (
         isinstance(learning_rate, bool)
         or not isinstance(learning_rate, (int, float))
-        # A JSON integer can be larger than a float holds, and math.isfinite
-        # raises OverflowError on one rather than returning False.
-        or not _is_finite_number(learning_rate)
+        # A JSON integer can be larger than a float holds; see is_finite_number.
+        or not is_finite_number(learning_rate)
         or learning_rate <= 0
     ):
         raise ToolInputError(
-            f"learning_rate must be a positive number; received "
+            f"learning_rate must be a positive finite number; received "
             f"{learning_rate!r}. Adam refuses a non-positive rate, and a rate of "
             "zero would run the whole loop without moving anything."
         )
@@ -580,7 +631,8 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
         One float per name, in ``names`` order.
 
     Raises:
-        ToolInputError: If a name is unknown, missing, or not a real number.
+        ToolInputError: If a name is unknown, missing, or not a finite real
+            number.
     """
     if values is None:
         return dict.fromkeys(names, 0.0)
@@ -609,7 +661,7 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
-            or not _is_finite_number(value)
+            or not is_finite_number(value)
         ):
             raise ToolInputError(
                 f"values[{name!r}] is {value!r}; every starting value must be a finite real number."

@@ -56,7 +56,7 @@ testpaths = ["tests"]
 addopts = "-m 'not integration' --strict-markers"
 asyncio_mode = "auto"
 markers = [
-    "unit: pure-logic tests with no subprocess or network",
+    "unit: tests that need no server process, network or hardware (a subprocess that imports the package is still unit tier: it is how laziness is observable)",
     "integration: tests that exercise the server process end to end",
 ]
 

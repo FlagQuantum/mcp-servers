@@ -493,10 +493,19 @@ def train_parameters_tool(
 
     Refused before starting: a circuit with no parameters, a missing or
     malformed objective, a starting value that names a parameter the circuit
-    does not have or omits one it does, a step count or learning rate the
-    optimizer cannot use, a circuit carrying "observables" (never read — put the
-    objective in "hamiltonian"), and any run whose predicted cost is past the
-    budget. The prediction is an estimate, not a measurement of your machine.
+    does not have or omits one it does, a step count that is not a positive
+    whole number or a learning rate that is not a positive finite number (either
+    of them too large for a float included), a circuit carrying "observables"
+    (never read — put the objective in "hamiltonian"), and any run whose
+    predicted cost is past the budget. The prediction is an estimate, not a
+    measurement of your machine.
+
+    A learning rate that is finite and positive but larger than the optimizer's
+    own arithmetic can hold is not caught before the run — it fails inside the
+    SDK's first update, and the refusal that comes back names "learning_rate"
+    and the rate it overflowed on rather than the circuit. Measured on the SDK
+    installed here, 3.4e37 trains and 4e37 does not, at every width tried; that
+    boundary is float32's maximum divided by ten.
 
     Adam at the learning rate you set. Losses are reported one per step, so a
     caller can see whether the run is still moving; whether it has converged is

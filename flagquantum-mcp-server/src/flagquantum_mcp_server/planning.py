@@ -28,6 +28,7 @@ from flagquantum_mcp_server.errors import (
     UnsupportedFormatError,
 )
 from flagquantum_mcp_server.preconditions import (
+    is_finite_number,
     reject_outputs_with_declared_measurements,
 )
 
@@ -247,8 +248,8 @@ def validate_pauli_terms(terms: Any, *, n_wires: int) -> list[tuple[str, float]]
         )
     if not terms:
         raise ToolInputError(
-            "'terms' is empty. An expectation needs at least one term; for a "
-            "single unweighted term pass 'pauli' instead."
+            "'terms' is empty. An expectation needs at least one term; a single "
+            "unweighted one is written as a list of one entry."
         )
     bound = limits.max_hamiltonian_terms()
     if len(terms) > bound:
@@ -289,9 +290,17 @@ def _weighted_term(term: Any, position: int, *, n_wires: int) -> tuple[str, floa
     if isinstance(coefficient, bool) or not isinstance(coefficient, (int, float)):
         raise ToolInputError(
             f"{where} has a coefficient that is {_name_of(coefficient)}; it "
-            "must be a real number. A symbol is not accepted here — the SDK "
-            "builds a parameter expression from one rather than an observable, "
-            "so it cannot be evaluated."
+            "must be a finite real number. A symbol is not accepted here — the "
+            "SDK builds a parameter expression from one rather than an "
+            "observable, so it cannot be evaluated."
+        )
+    if not is_finite_number(coefficient):
+        raise ToolInputError(
+            f"{where} has a coefficient that is {coefficient!r}, which is too "
+            "large to be a float, so it is not a finite real number either. "
+            "Without this refusal the conversion below raises OverflowError, and "
+            "the caller gets an internal error instead of a message naming the "
+            "term."
         )
     _check_pauli_string(pauli, n_wires=n_wires, where=where)
     return pauli.upper(), float(coefficient)

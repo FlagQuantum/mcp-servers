@@ -17,16 +17,20 @@ The remedies differ by tool — a simulation points at ``outputs``, a training r
 at ``hamiltonian`` — so the caller supplies the sentence that says what to do
 instead. The fact is shared; the advice is not.
 
-The module also carries the two things that are shared but are not refusals:
-``plain``, the conversion from SDK containers to JSON-native values, and
-``SDK_FAILURE_BASES``, the exception bases an execution call can raise. Keeping
-them beside the refusals is deliberate — a caller reaching for one should find
-the others, and all three exist because more than one tool needs them.
+The module also carries the things that are shared but are not refusals:
+``plain``, the conversion from SDK containers to JSON-native values;
+``SDK_FAILURE_BASES``, the exception bases an execution call can raise; and
+``is_finite_number``, the check a guard runs on a number before the SDK is
+handed it. Keeping them beside the refusals is deliberate — a caller reaching
+for one should find the others, and each is here rather than beside its first
+caller because the second caller would otherwise write a second opinion about
+the same fact.
 """
 
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -41,6 +45,32 @@ SDK_FAILURE_BASES: tuple[type[BaseException], ...] = (
     RuntimeError,
     NotImplementedError,
 )
+
+
+def is_finite_number(value: int | float) -> bool:
+    """Is this a finite real, without raising on one too large to be a float?
+
+    ``math.isfinite`` raises ``OverflowError`` on an ``int`` bigger than a float
+    can hold, which a JSON integer literal can be — ``json.loads("1" + "0"*400)``
+    is a perfectly ordinary Python int. Measured: without this, such a value
+    escapes the guard as an ``OverflowError`` and reaches the client as an
+    internal error instead of a refusal naming the argument.
+
+    Shared rather than private to its first caller: the training tool's three
+    guards and the shared Pauli-term validator both decide whether a JSON number
+    is usable, and two copies of that rule are two answers waiting to differ.
+    Every one of them is pinned by a ``10**400`` case.
+
+    Args:
+        value: A number already known to be an ``int`` or a ``float``.
+
+    Returns:
+        True if it is finite.
+    """
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def reject_outputs_with_declared_measurements(outputs: Any, ir: Any) -> None:
@@ -109,9 +139,9 @@ def reject_circuit_observables(ir: Any, *, remedy: str) -> None:
         return
     raise ToolInputError(
         f"This circuit's 'observables' field carries {len(observables)} "
-        "entr(ies), and nothing this server runs evaluates it: the field is "
-        "dropped without a word rather than refused, so a result would carry "
-        f"neither the value it names nor an error. {remedy}"
+        "entr(ies), and nothing this server runs evaluates it: the run drops "
+        "the field without a word rather than refusing it, so a result would "
+        f"carry neither the value it names nor an error. {remedy}"
     )
 
 

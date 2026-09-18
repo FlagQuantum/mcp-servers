@@ -376,10 +376,13 @@ The result says where it ran, in the SDK's own fields rather than in a summary:
 }
 ```
 
-`accuracy.metric` is `not_measured`, and the plan behind the run reports
-`release_gate_allowed: false`. An ideal simulation of a circuit is a statement
-about that circuit, not about any device that would run it — the SDK declines to
-license a stronger reading, and this server does not add one.
+`accuracy.metric` is `not_measured`, and `plan_execution_tool` reports
+`release_gate_allowed: false` for the same circuit. That second field is the
+plan's, in its `summary` — the simulation result above carries `execution`,
+`outputs` and `status`, and its `accuracy` block has five fields (`version`,
+`metric`, `value`, `tolerance`, `passed`). An ideal simulation of a circuit is a
+statement about that circuit, not about any device that would run it — the SDK
+declines to license a stronger reading, and this server does not add one.
 
 Three things are refused rather than reinterpreted, each because accepting
 would produce a plausible-looking answer:
@@ -462,7 +465,10 @@ gate is applied, so no 24-wire circuit gets more than two steps, and the layered
 ansatz measured here — 71 instructions — is predicted at 119 s per step and gets
 none. That is a statement about the circuit, not the width: one gate at 24 wires
 is still under the budget, and the budget refuses by prediction rather than by
-width, so a narrow circuit with many layers is refused for the same reason.
+width, so a *narrow* circuit with many layers is bounded for the same reason — a
+2500-instruction four-wire circuit is predicted at 0.25 s per step, which the
+default budget admits 238 steps at a time where a one-gate circuit at that width
+gets three thousand.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run
 converged is your reading, not this tool's claim, and the SDK's

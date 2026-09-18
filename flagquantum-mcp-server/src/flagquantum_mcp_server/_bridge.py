@@ -2,9 +2,18 @@
 
 This repository is an out-of-tree edge adapter: it must not become a reason
 for FlagQuantum to grow an MCP dependency, and it must not make importing the
-MCP server expensive. ``flagquantum`` pulls ``torch`` at import time, so the
-SDK is bound lazily and cached on first use. A failed import surfaces as a
-structured tool error rather than a traceback at server start-up.
+MCP server expensive. So the SDK and torch are both bound on first use and
+cached rather than imported at module load: a failed import surfaces as a
+structured tool error rather than a traceback at start-up, and the one call
+that needs the SDK pays for it instead of every client that only wants to list
+a tool.
+
+The weight being avoided is ``torch``'s, not the SDK's. Measured on the pair
+installed here: ``import flagquantum`` costs 5 to 16 ms and leaves ``torch``
+absent from ``sys.modules``, while ``import torch`` costs 0.53 s. An earlier
+version of this paragraph gave "``flagquantum`` pulls ``torch`` at import time"
+as the reason. That is false, and the true reason runs the other way: the SDK's
+training API needs torch, and this package deliberately does not declare it.
 """
 
 from __future__ import annotations

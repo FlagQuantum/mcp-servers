@@ -268,6 +268,30 @@ def test_a_malformed_training_budget_falls_back_rather_than_disabling_the_bound(
     assert limits.max_train_seconds() == 60
 
 
+def test_the_budget_model_s_constants_are_the_values_that_were_calibrated() -> None:
+    """The model's *values*, not only its shape.
+
+    ``test_the_gate_term_is_the_coefficient_times_instructions_times_state``
+    reads ``GATE_COST`` back from the module, so it passes under any mutation of
+    the constant — including one that makes the model a hundred times more
+    conservative, which nothing else would catch either. Each number here is a
+    measured quantity with a table of calibration points behind it, restated in
+    ``training.predict_seconds`` and in the design document; changing one changes
+    what every caller is allowed to ask for, so it should take a deliberate edit
+    in two places rather than one.
+
+    Pinned beside the two budget pins above because it is the same kind of fact:
+    a number this repository chose, rather than one the SDK publishes.
+    """
+    from flagquantum_mcp_server import training
+
+    assert training.STARTUP_SECONDS == 0.5
+    assert training.MIN_STEP_SECONDS == 0.02
+    assert training.STATE_COST == 1.5e-6
+    assert training.GATE_COST == 1e-7
+    assert training.DISPATCH_COST == 2e-4
+
+
 def test_torch_is_reached_lazily_and_is_not_a_declared_dependency() -> None:
     """The optimizer type is torch's, but torch is not this package's to declare."""
     from importlib.metadata import requires

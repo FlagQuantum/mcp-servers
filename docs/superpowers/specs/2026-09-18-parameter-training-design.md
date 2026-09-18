@@ -139,10 +139,32 @@ count, which for the four-layer rows is `12n - 4`.
 | 22 | 1 | 65 | 8.6 s | 14 min |
 | 24 | 1 | 71 | 68 s | 1.9 h |
 
-Three costs, and all three are visible in that table. At small widths the per-step
-cost is nearly flat and dominated by dispatch. Past 12 qubits the state the SDK
-carries takes over and grows as `2 ** n_wires`. Gate count matters too, in both
-regimes: at 16 qubits, four layers cost 147 ms/step against one layer's 85 ms.
+And the same measurement at small widths *with many instructions*, which is the
+axis the first table cannot show — every row of it is either narrow with few
+instructions or wide:
+
+| width | instructions | per step | 100 steps |
+| --- | --- | --- | --- |
+| 2 | 4000 | 223 ms | 22 s |
+| 4 | 2500 | 126 ms | 13 s |
+| 6 | 1500 | 80 ms | 8 s |
+| 8 | 2500 | 135 ms | 14 s |
+| 8 | 4000 | 221 ms | 22 s |
+
+Those rows are measured on an `ry`/`cx` block repeating with one angle per gate,
+which is the shape that fits inside the payload bound at these instruction
+counts; the rows above use `3n - 1` per layer. The two shapes agree on the
+per-instruction cost to within the run-to-run spread, which is what makes the
+fourth term below a constant rather than a function of the circuit.
+
+Four costs, and all four are visible in those two tables. At small widths with
+few instructions the per-step cost is nearly flat and dominated by dispatch. Past
+12 qubits the state the SDK carries takes over and grows as `2 ** n_wires`. Gate
+count matters too, in both regimes: at 16 qubits, four layers cost 147 ms/step
+against one layer's 85 ms. And at small widths the gate count decides the cost
+just as it does at large ones, which the first table could not see: 1.8 ms per
+step at four wires with eleven instructions against 126 ms at the same width with
+2500.
 
 A first call in a fresh process additionally pays ~0.5 s once, tracing the
 builder with `make_fx`. That is why an unpractised measurement looks like a flat
@@ -260,21 +282,61 @@ stdio session that hangs for an hour with the client blocked.
 startup         ≈ 0.5                                          seconds, once
 per_step        ≈ max(0.02,
                       2 ** n_wires × 1.5e-6,                  holding the state
-                      n_instructions × 2 ** n_wires × 1e-7)   applying gates
+                      n_instructions × 2 ** n_wires × 1e-7,   applying gates
+                      n_instructions × 2e-4)                  building each gate
 predicted_total ≈ startup + steps × per_step
 ```
 
-Three terms, because cost has three regimes, and each term is a cost that was
+Four terms, because cost has four regimes, and each term is a cost that was
 measured rather than a fitted fudge. `startup` is the `make_fx` trace, paid once
-per process. The other two are paid on every step and are separate terms because
+per process. The other three are paid on every step and are separate terms because
 they were measured to be separate: **holding** a state of `2 ** n_wires`
-amplitudes costs `1.5e-6` per amplitude, and **applying** gates against it costs
-`1e-7` per amplitude per instruction. The `0.02` floor is dispatch, measured at
-1.8 ms at 4 qubits and 9 ms at 12, rounded up.
+amplitudes costs `1.5e-6` per amplitude, **applying** gates against it costs
+`1e-7` per amplitude per instruction, and **building** each gate costs a flat
+`2e-4` per instruction whatever the width. The `0.02` floor is dispatch at the
+bottom of the range, measured at 1.8 ms at 4 qubits and 9 ms at 12, rounded up.
 
-The state term is the one this model first got wrong, and how it got it wrong is
+The fourth term was added after the third model shipped, and it was missing along
+an axis none of the third model's sixteen calibration points could see. Each of
+the sixteen is either small-width with few instructions, where the floor governs,
+or large-width, where the state or gate term governs. **None is small-width with
+many instructions**, and on that axis the third model predicted its floor while
+the truth was 5.0e-5 to 9.7e-5 s per instruction:
+
+| width | instructions | per-step measured | third model | fourth model | over by |
+| --- | --- | --- | --- | --- | --- |
+| 2 | 4000 | 0.2232 s | 0.0200 s | 0.8000 s | 3.6× |
+| 4 | 2500 | 0.1260 s | 0.0200 s | 0.5000 s | 4.0× |
+| 6 | 1500 | 0.0795 s | 0.0200 s | 0.3000 s | 3.8× |
+| 8 | 2500 | 0.1352 s | 0.0640 s | 0.5000 s | 3.7× |
+| 8 | 4000 | 0.2210 s | 0.1024 s | 0.8000 s | 3.6× |
+
+The measured column is the smallest of three runs, the convention the rest of
+this section uses. The coefficient is sized against the largest *single* run
+rather than the smallest, because repeated runs of one circuit on one machine
+spread by up to 1.9× — 0.1260 s against 0.2420 s per step at four wires with 2500
+instructions, 5.0e-5 against 9.7e-5 s per instruction — so `2e-4` clears the
+worst observation by 2.1× and the best by 4×.
+
+The consequence of the missing term is the same shape as the missing state term
+was, and larger: the third model admitted 2975 steps of the two-wire circuit
+above — 664 s of work against a 60 s budget. The fourth model admits 74.
+
+It has to be a fourth term rather than a bigger `GATE_COST`, for the reason the
+per-instruction cost at 24 wires is 610 ms while at 4 wires it is 5e-5 s: the
+real cost is strongly *sub*-linear in `2 ** n_wires`, because at small widths it
+is Python dispatch rather than state update. A `GATE_COST` large enough for four
+wires would refuse every 24-wire circuit, including the 71-instruction one this
+design measures at 68.5 s.
+
+The wrong direction is still the same one, and this term does not change it: at
+twenty-one calibration points the model over-predicts everywhere, by 1.9× at the
+worst. The new term governs over roughly two to eleven wires, and above that the
+gate term is larger, so none of the sixteen earlier predictions moves.
+
+The state term is the one the second model got wrong, and how it got it wrong is
 worth recording, because the same mistake is available to anyone re-deriving the
-model from this section. The version before this one had only the floor and the
+model from this section. The version before it had only the floor and the
 gate term. Every row of the table below over-predicted, so it looked sound — but
 every row was one of two kinds, and neither kind could see the missing cost.
 Where the width was small (4, 8, 12) the floor swamped both terms, so the row
@@ -285,10 +347,9 @@ exactly where the two-term model broke: at 24 wires with a single gate, one step
 costs 12.5 s, 7.5× what one instruction explains, with the other 87% being the
 cost of holding the state at all. The model admitted that call for 35 steps at a
 predicted 59.2 s, and it took 438 s. **A calibration table that omits an axis
-cannot constrain the model along it.** The shipped test's table is sixteen
-points rather than ten, and the six it gained — `(16, 3)`, `(20, 1)`, `(20, 3)`,
-`(22, 1)`, `(24, 1)`, `(24, 4)` — are the ones the state term is calibrated
-against.
+cannot constrain the model along it.** That sentence was written here after the
+state term was added, and the third model then broke it again on the other axis,
+which is why the fourth term's table is in this section beside the third's.
 
 Checked against every measurement in the table above, plus the cold first call.
 Every row is unchanged from the two-term model's predictions, which is the point
@@ -335,6 +396,12 @@ calibrated from cold measurements where the one-time trace had been divided
 across the steps. It under-predicted at 16 qubits, and its stated table did not
 reproduce: re-measuring warm gave 4 ms/step at 8 qubits where the draft said 20.
 
+The third model's own table above is unchanged by the fourth term, which is worth
+noticing rather than assuming: none of its rows is small-width with many
+instructions either, so it could not tell the two models apart. It is kept as the
+check that neither model under-predicts the circuits this design measured, and
+the fourth term's table in the previous section is where its own axis is checked.
+
 If `predicted_total > FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` (default 60), the tool
 refuses and names the prediction, the width, the steps, and the variable that
 raises the bound.
@@ -350,6 +417,13 @@ was the widest width admitting a run, both of which were false by arithmetic
 alone: the 68 s and 119.6 s figures are properties of the 71-instruction circuit
 the design was calibrated on, not of the width.
 
+The same reading applies at the other end, and it is what the fourth term makes
+true rather than nearly true. A narrow circuit with many layers is bounded by the
+same prediction rather than by an exemption for being narrow: a 2500-instruction
+four-wire circuit predicts 0.5 s per step where a one-gate circuit at that width
+predicts the floor, and the budget admits 119 steps of the one against three
+thousand of the other.
+
 The description says this is an estimate rather than a measurement of the
 caller's machine.
 
@@ -362,10 +436,20 @@ Each is a case where accepting would produce a plausible-looking answer.
 | a circuit with no parameters | there is nothing to train; the loss would be constant |
 | no `hamiltonian` | without one the value is not an energy |
 | malformed `hamiltonian` terms | reuses the `terms` builder's refusals, naming the term index |
+| a `coefficient` no float can hold | same validator, same reason as the step count below |
 | `values` naming an unknown parameter | a typo would otherwise be silently ignored and the parameter left at zero |
 | `values` missing a parameter the circuit has | the rest would silently train from zeros |
-| `steps < 1` | a loop that cannot improve anything still reports success |
+| `steps` below 1, or past what a float holds | a loop that cannot improve anything still reports success; and a count too large to convert is an `OverflowError` escaping as an internal error rather than a refusal naming the argument |
 | predicted cost over the budget | see above |
+
+The last two are one family: a JSON integer literal can be larger than a float,
+and `json.loads("1" + "0" * 400)` is an ordinary Python `int`. `steps` is the
+only one of the three numeric guards a client can reach with such a value —
+`values` and `learning_rate` are typed `number` in the schema, so pydantic
+rejects a 400-digit integer before any guard runs, while `steps` is typed
+`integer` and passes straight through. The shared validator needed the same
+check for a term's coefficient, because the same literal reaches it from both the
+`expectation` and the training path.
 
 ## Tests
 
@@ -380,6 +464,8 @@ Each is a case where accepting would produce a plausible-looking answer.
 - the returned `parameters` fed back as `values` continues rather than restarts
 - each refusal above, asserting on the message and not only the code
 - the budget refusal fires **before** the run: assert the wall clock stays small
+- the budget model is an upper bound at every point it was calibrated from,
+  including the small-width/many-instruction axis the third model lacked
 - every new assertion mutation-tested, per AGENTS.md
 
 ## The dependencies this needs, and why they are allowed
