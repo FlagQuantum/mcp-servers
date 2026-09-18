@@ -1379,7 +1379,16 @@ Cost is the one thing here that a caller cannot predict from the size of their i
   - `training.predict_seconds(ir: Any, steps: int) -> float`
   - `training.STARTUP_SECONDS: float` = 0.5
   - `training.MIN_STEP_SECONDS: float` = 0.02
-  - `training.STEP_COST_COEFFICIENT: float` = 1e-7
+  - `training.STATE_COST: float` = 1.5e-6
+  - `training.GATE_COST: float` = 1e-7
+
+**This task's code blocks below are superseded.** The first version of the model
+was one width-independent floor plus one coefficient, and review measured it
+under-predicting by up to 105x in the low-instruction region — a 24-wire,
+one-gate call it admitted for 35 steps took 438 s. The shipped shape has three
+terms and the constants above; **the shipped source is the authority for this
+task, not the code quoted here.** The steps are kept because the calibration
+table and the mutation targets they describe are still the ones in force.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -2426,7 +2435,11 @@ def _read_back(module: Any, names: tuple[str, ...]) -> dict[str, float]:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 31 tests.
+Expected: PASS, 32 tests — twenty after Task 6, plus the twelve Step 1 adds.
+Assert the *delta*, not the total: read the count off the run's own output and
+check it went up by twelve. Every absolute figure in this plan's earlier tasks
+was written before their fix rounds added tests, and every one of them came out
+one or two low as a result.
 
 If `test_the_hamiltonian_reaches_the_objective` fails by converging to -1, the `policy=` argument is not reaching the SDK. That is the exact failure this task exists to prevent; do not weaken the assertion.
 
@@ -2697,7 +2710,9 @@ Change `train_parameters` to call `_objective(hamiltonian, n_wires=int(ir.n_wire
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 44 tests.
+Expected: PASS. This step adds nine tests; read the count off the output and
+check it rose by nine. (The figure once written here was 44 and was three high —
+it had been computed before earlier tasks' fix rounds added their own tests.)
 
 - [ ] **Step 5: Mutation-test each refusal**
 
