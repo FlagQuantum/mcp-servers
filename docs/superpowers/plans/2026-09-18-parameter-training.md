@@ -1846,6 +1846,15 @@ If either assertion fails, add it to the test module as
 a mismatch here would train a different Hamiltonian than the caller wrote, with
 every energy plausible.
 
+**Add that test unconditionally, whether or not the probe above passes.** The
+probe is a one-shot check against today's SDK; the test is what keeps it true
+after the next upgrade. Measured, reversing the wire-map enumeration leaves every
+other test in the module green while `"IX"` lands on wire 0 — so without this
+test the failure mode is a silently different Hamiltonian, not a red suite. A
+probe that passes is not a reason to skip writing the test down; two tasks in
+this plan have already lost a fix round to a check that was run once and never
+pinned.
+
 Then the mutation that matters most in this task. On this path
 `hamiltonian_from_terms` calls `validate_pauli_terms` and builds through
 `algorithms.pauli_term`; `planning._pauli_observable` is **not** involved. So
@@ -1867,7 +1876,7 @@ after = before.replace(
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
-../.venv/bin/pytest tests/test_training.py -k "refuses_the_expectation_builder" -q
+../.venv/bin/pytest tests/test_training.py -k "expectation_builder_refuses" -q
 ../.venv/bin/python -c "
 from flagquantum_mcp_server.training import hamiltonian_from_terms
 H = hamiltonian_from_terms([{'pauli': 'ZZ', 'coefficient': -1.0}, {'pauli': 'II', 'coefficient': 99.0}], n_wires=2)
@@ -1875,11 +1884,22 @@ print('objective built with an all-identity term:', H)
 print('its ops:', [t.ops for t in H.terms])
 "
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/planning.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected, and measured before this plan was written: the pytest run FAILS on
 `test_a_term_that_the_expectation_builder_refuses_is_refused_here_too`, and the
 second command **succeeds**, building a `HamiltonianTerm` whose `ops` is `()`.
+
+**The `-k` expression must select exactly one test.** `-k` matches substrings of
+the test name, and the name is
+`test_a_term_that_the_expectation_builder_refuses_is_refused_here_too` — so a
+filter spelled `refuses_the_expectation_builder` selects **nothing** and exits 5
+with `21 deselected`, which looks like a result and is not one. Read the
+selector's own line (`1 failed, 20 deselected` / `21 deselected`) before reading
+anything into the outcome; an earlier draft of this step carried the
+non-matching spelling and would have reported a red that never happened.
+
 The SDK does not refuse an all-identity term — it accepts it and contributes
 `coefficient × ⟨I⟩` to every energy. So without this check the training tool
 would minimize a Hamiltonian with a constant the caller never wrote, converge
@@ -1887,7 +1907,40 @@ cleanly, and report the result as an energy. That is the same shape of failure
 as the `RuntimePolicy` trap this design was rewritten around, which is why the
 refusal is pinned by a test rather than left to the SDK.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Pin the tier-3 dependency this task introduces**
+
+`hamiltonian_from_terms` reaches two names through `flagquantum.algorithms`,
+which is tier 3: public, but in no capability's `public_apis` and not in the
+frozen snapshot. AGENTS.md rule 3 admits a tier-3 name when there is a reason
+and a test pins it — so the pin belongs in the same change as the dependency,
+not four tasks later. Add to `flagquantum-mcp-server/tests/test_api_contract.py`,
+beside `TIER3_EMITTERS`:
+
+```python
+# Tier 3: public names a package declares in its own __all__, not in the frozen
+# snapshot. The training objective needs both, and there is no other way to say
+# what to minimise — see docs/superpowers/specs/2026-09-18-parameter-training-design.md.
+TIER3_TRAINING = (
+    ("flagquantum.algorithms", "Hamiltonian"),
+    ("flagquantum.algorithms", "pauli_term"),
+)
+```
+
+and, beside `test_emitter_submodules_still_expose_their_functions`:
+
+```python
+@pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)
+def test_training_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
+    module = importlib.import_module(module_path)
+
+    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
+    assert hasattr(module, attribute)
+```
+
+Run: `../.venv/bin/pytest tests/test_api_contract.py -q`
+Expected: PASS, and the new test appears twice, once per tuple.
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add flagquantum-mcp-server/src/flagquantum_mcp_server/_bridge.py \
@@ -3023,26 +3076,11 @@ Two jobs that are cheap together and expensive apart: a tier-3 dependency nothin
 
 - [ ] **Step 1: Write the failing contract test**
 
-Add to `flagquantum-mcp-server/tests/test_api_contract.py`:
+`TIER3_TRAINING` and `test_training_dependencies_are_still_declared_public`
+already landed in Task 6, beside the code that creates the dependency. This step
+adds the rest — the policy pin, and the `Module` members the tool reads:
 
 ```python
-# Tier 3: public names a package declares in its own __all__, not in the frozen
-# snapshot. The training objective needs both, and there is no other way to say
-# what to minimise — see docs/superpowers/specs/2026-09-18-parameter-training-design.md.
-TIER3_TRAINING = (
-    ("flagquantum.algorithms", "Hamiltonian"),
-    ("flagquantum.algorithms", "pauli_term"),
-)
-
-
-@pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)
-def test_training_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
-    module = importlib.import_module(module_path)
-
-    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
-    assert hasattr(module, attribute)
-
-
 def test_the_policy_that_makes_a_hamiltonian_reach_the_objective_still_exists() -> None:
     """Without this object the SDK evaluates ⟨Z₀⟩ and ignores the Hamiltonian.
 
