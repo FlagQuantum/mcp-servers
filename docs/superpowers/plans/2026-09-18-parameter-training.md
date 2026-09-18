@@ -103,10 +103,7 @@ def validate_pauli_terms(terms: Any, *, n_wires: int) -> list[tuple[str, float]]
             "request may ask for. FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS raises "
             "the bound for a deployment that needs a larger operator."
         )
-    return [
-        _weighted_term(term, position, n_wires=n_wires)
-        for position, term in enumerate(terms)
-    ]
+    return [_weighted_term(term, position, n_wires=n_wires) for position, term in enumerate(terms)]
 
 
 def _weighted_term(term: Any, position: int, *, n_wires: int) -> tuple[str, float]:
@@ -214,60 +211,21 @@ def _check_pauli_string(pauli: str, *, n_wires: int, where: str | None = None) -
         )
 
 
-def _pauli_observable(pauli: str, *, n_wires: int, where: str | None = None) -> Any:
-    """Build an ``Observable`` from a Pauli string such as ``"ZZI"``.
+**`_pauli_observable` is not reproduced here and is not edited.** Its
+signature keeps `where: str | None = None` and its body keeps every check it
+has today, including the `subject` line that reads it. Open the file and leave
+the function as you find it. Two reasons, and the second is the one that
+matters:
 
-    Unchanged by this task, and deliberately so. It validates as it builds,
-    which means a term reaching it through :func:`_hamiltonian_observable` is
-    checked twice — once here and once by :func:`_weighted_term`. The second
-    check cannot fire, and the cost is one length comparison.
-
-    The alternative is stripping the validation out and adding a
-    ``_check_pauli_string`` call at the single-pauli path in ``_build_output``.
-    That is a smaller function and a larger change: it moves a refusal out of
-    the function that owns the string and relies on every future caller
-    remembering to validate first. Two cheap checks in the wrong order is the
-    better trade here, and the mutation in Step 4 is what proves the outer one
-    is the one naming ``terms[i]``.
-
-    Args:
-        pauli: One letter per wire, drawn from ``I``, ``X``, ``Y``, ``Z``.
-        n_wires: Circuit width the string must match.
-        where: How to name the caller's location in a refusal, when this string
-            is one term of several. ``_weighted_term`` names it there instead, so
-            this is only reached from the single-pauli path, where it is ``None``.
-
-    Returns:
-        A ``flagquantum.Observable``.
-
-    Raises:
-        ToolInputError: If the string is malformed, is entirely identity, or
-            does not match the circuit width.
-    """
-    subject = "Pauli string" if where is None else f"{where} 'pauli'"
-    upper = pauli.upper()
-    if len(upper) != n_wires:
-        raise ToolInputError(
-            f"{subject} {pauli!r} covers {len(upper)} wires, but the circuit has "
-            f"{n_wires}. One letter per wire is required."
-        )
-    bad = sorted(set(upper) - PAULI_LETTERS)
-    if bad:
-        raise ToolInputError(
-            f"{subject} {pauli!r} contains unsupported letters {bad}; "
-            f"use only {sorted(PAULI_LETTERS)}."
-        )
-    sdk = load_sdk()
-    factors = [getattr(sdk, letter)(wire) for wire, letter in enumerate(upper) if letter != "I"]
-    if not factors:
-        raise ToolInputError(
-            f"{subject} {pauli!r} is entirely identity, which is not a measurable "
-            "observable. Drop the term, or name a wire it acts on."
-        )
-    observable = factors[0]
-    for factor in factors[1:]:
-        observable = observable @ factor
-    return observable
+1. It is already correct. The `where` parameter arrived with `terms` in 0.2.0,
+   and the single-pauli path through `_build_output` depends on it.
+2. A `terms` entry now passes two checks — `_weighted_term`'s, which names
+   `terms[i]`, and this one, which fires only if the first did not. The second
+   cannot fire for a `terms` call. It costs one length comparison and it keeps
+   the refusal inside the function that owns the string, which is worth more
+   than the branch it saves. The Step 4 mutation is what shows the outer check
+   is the one carrying the location, and that is the only observable
+   difference between them.
 ```
 
 **Leave `_build_output` alone.** Its single-pauli path calls
