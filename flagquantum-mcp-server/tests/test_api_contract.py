@@ -41,6 +41,14 @@ TIER3_EMITTERS = (
     ("flagquantum.compiler.qcis", "emit_qcis"),
 )
 
+# Tier 3: public names a package declares in its own __all__, not in the frozen
+# snapshot. The training objective needs both, and there is no other way to say
+# what to minimise — see docs/superpowers/specs/2026-09-18-parameter-training-design.md.
+TIER3_TRAINING = (
+    ("flagquantum.algorithms", "Hamiltonian"),
+    ("flagquantum.algorithms", "pauli_term"),
+)
+
 # The analysis fields this server reports. Extra fields are fine; these are the
 # ones a prompt or an example may name.
 REQUIRED_ANALYSIS_FIELDS = frozenset(
@@ -122,6 +130,14 @@ def test_emitter_submodules_still_expose_their_functions(module_path: str, attri
     module = importlib.import_module(module_path)
 
     assert hasattr(module, attribute), f"{module_path}.{attribute} disappeared"
+
+
+@pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)
+def test_training_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
+    module = importlib.import_module(module_path)
+
+    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
+    assert hasattr(module, attribute)
 
 
 def test_analysis_object_still_carries_the_fields_we_report() -> None:
