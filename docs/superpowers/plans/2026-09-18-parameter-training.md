@@ -2888,23 +2888,49 @@ def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
         ToolInputError: If the objective is missing or unusable.
         ToolLimitError: If it carries more terms than the bound allows.
     """
-    if hamiltonian is None:
-        raise ToolInputError(
-            "hamiltonian is required. Without an objective the value the SDK "
-            "reports is not an energy, and training it would minimise an "
-            "unnamed quantity to convergence and hand back a plausible number. "
-            'Give the Pauli sum to minimise: [{"pauli": "ZZ", "coefficient": '
-            '1.0}, {"pauli": "XI", "coefficient": -0.5}].'
-        )
-    if isinstance(hamiltonian, (list, tuple)) and not hamiltonian:
-        raise ToolInputError(
-            "hamiltonian is empty. A training objective needs at least one "
-            'term, such as [{"pauli": "ZZ", "coefficient": 1.0}].'
-        )
     try:
         return hamiltonian_from_terms(hamiltonian, n_wires=n_wires)
+    except ToolLimitError as exc:
+        raise ToolLimitError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolInputError as exc:
-        raise ToolInputError(str(exc).replace("'terms'", "'hamiltonian'")) from exc
+        raise ToolInputError(_in_this_tools_vocabulary(str(exc))) from exc
+
+
+def _in_this_tools_vocabulary(message: str) -> str:
+    """Restate a shared refusal in the nouns the training caller wrote.
+
+    ``validate_pauli_terms`` speaks the vocabulary of an ``expectation`` output:
+    the list is ``terms``, an entry is ``terms[0]``, and the whole thing is an
+    "expectation". Reached from ``train_parameters`` the caller wrote
+    ``hamiltonian`` and an objective, so every one of those nouns names something
+    they never typed. The refusals themselves are unchanged; only the nouns move.
+
+    **Four shapes, not one, and that was not obvious.** The first version of this
+    replaced ``'terms'`` alone — the quoted field name. Every *term-level*
+    message says ``terms[0]`` unquoted, and those are the majority, because a
+    malformed term is the common case. Measured: the field-level pair were
+    renamed and all six term-level refusals still said ``terms``.
+
+    **The two phrases are named, not replaced wholesale.** A blanket
+    ``expectation`` -> ``objective`` would also rewrite the message for an
+    ``expectation`` *output*, which is the one place the word is correct. This
+    function only ever runs on the training path, so that cannot happen today —
+    but a phrase list that says what it covers is auditable and a blanket replace
+    is not. If the validator gains a fifth shape, add it here; the property test
+    below is what will notice.
+
+    Args:
+        message: A refusal's text, from the shared validator.
+
+    Returns:
+        The same refusal, in this tool's nouns.
+    """
+    return (
+        message.replace("'terms'", "'hamiltonian'")
+        .replace("terms[", "hamiltonian[")
+        .replace("An expectation needs", "An objective needs")
+        .replace("This expectation carries", "This objective carries")
+    )
 ```
 
 Then change the call in `train_parameters`. Replace exactly this line:
@@ -2921,12 +2947,79 @@ with:
 
 `hamiltonian_from_terms` stays imported — `_objective` calls it.
 
+Then two more, which are what make the rename a property rather than a phrase
+list. Append them to `flagquantum-mcp-server/tests/test_training.py`:
+
+```python
+def test_no_refusal_from_this_tool_says_a_noun_the_caller_did_not_write() -> None:
+    """Every refusal, in the caller's vocabulary — checked as a property.
+
+    Every message below comes from the shared validator, which speaks the
+    vocabulary of an ``expectation`` output. A caller who wrote ``hamiltonian``
+    must never be told about ``terms``, ``terms[0]`` or an ``expectation``:
+    those name something they never typed, and a message that has to be
+    translated is one that cannot be acted on.
+
+    Checked over every malformed shape at once rather than phrase by phrase,
+    because phrase-by-phrase is exactly what let the first version miss the
+    term-level refusals — it replaced the quoted field name, and ``terms[0]``
+    is unquoted.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    malformed = [
+        None,
+        [],
+        [{"coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": 1.0, "extra": 1}],
+        [{"pauli": "ZZZ", "coefficient": 1.0}],
+        [{"pauli": "II", "coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": "x"}],
+        "ZZ",
+    ]
+
+    for objective in malformed:
+        with pytest.raises(ToolInputError) as caught:
+            train_parameters(ANGLED, objective, "qir", steps=1)
+        message = str(caught.value)
+        assert "hamiltonian" in message, (objective, message)
+        assert "terms" not in message, (objective, message)
+        assert "expectation" not in message, (objective, message)
+
+
+def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rename must not swallow the bound's own error code.
+
+    ``ToolLimitError`` subclasses ``ToolInputError``, so a bare
+    ``except ToolInputError`` around the builder catches it and re-raises it as
+    the base class. Measured: the caller then sees ``INVALID_INPUT`` where the
+    bound had raised ``LIMIT_EXCEEDED``. The errors module exists so an agent can
+    branch on the code rather than parse prose, and this collapses two branches
+    into one.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS", "2")
+
+    with pytest.raises(ToolLimitError) as caught:
+        train_parameters(ANGLED, [{"pauli": "Z", "coefficient": 1.0}] * 5, "qir", steps=1)
+
+    assert caught.value.code == "LIMIT_EXCEEDED"
+    assert "hamiltonian" in str(caught.value)
+```
+
+`ToolLimitError` is already in this file's error import, from Task 7.
+
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds eight tests; read the count off the output and
-check it rose by eight. (Three of the refusals it would otherwise add are already
-in the file, shipped with Task 7 — see the note at the top of this task.)
+Expected: PASS. This step adds ten tests; read the count off the output and
+check the def count rose by ten. (Three of the refusals it would otherwise add
+are already in the file, shipped with Task 7 — see the note at the top of this
+task. One of the ten is parametrized, so the collected count rises by more than
+the def count; that is what Step 3 of Task 7 saw too.)
 
 - [ ] **Step 5: Mutation-test each refusal**
 
@@ -2935,8 +3028,7 @@ Each refusal is a guard clause. The mutation is to delete it and watch exactly o
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
-import ast, shutil, subprocess
-from pathlib import Path
+import ast, pathlib, shutil, subprocess
 
 path = Path("src/flagquantum_mcp_server/training.py")
 original = path.read_text()
