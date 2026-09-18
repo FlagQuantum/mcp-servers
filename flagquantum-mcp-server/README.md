@@ -186,6 +186,36 @@ FlagQuantum's `Parameter` defines no `__str__`, so `str()` falls through to
 `__repr__`. The symbol is intact — only the diagram's spelling is clumsy — and
 it affects both input formats equally.
 
+### On an explicit unitary
+
+A gate's matrix travels under a key that **differs by format**: the gate list
+calls it `gate`, serialized IR calls it `matrix`.
+
+```json
+[{"name": "any", "index": [0], "gate": [[0, 1], [1, 0]]}]
+```
+
+Two things are rejected rather than half-honoured.
+
+**The wrong key for the format.** `Circuit.from_qir` reads `gate` and ignores
+`matrix` entirely, so a gate list spelling it the IR way would be built with no
+matrix at all — silently. For a built-in name that means a different circuit
+than the caller wrote, so the key mismatch is named.
+
+**A matrix on a built-in opcode.** A matrix belongs to `any`, the opcode
+FlagQuantum reserves for it. On a built-in name the SDK keeps the matrix in the
+payload but lets the built-in's own definition win, which splits the tools:
+`analyze_circuit_tool` reports the gate under the built-in's name while the
+emitters refuse to lower it. Name the gate `any` instead.
+
+### On a wire number
+
+Wire numbers must be integers in both formats. This is worth stating because the
+SDK would accept more: it calls `int()` on each wire, so `"1"`, `true`, `1.7` and
+`0.9` all become a wire index. The last one is the reason this is an error rather
+than a convenience — a value that means nothing turns into a circuit that looks
+fine. Both readers refuse all four.
+
 ### On emitted text
 
 `emit_openqasm_tool` measures every wire unless `result_wires` names the ones you

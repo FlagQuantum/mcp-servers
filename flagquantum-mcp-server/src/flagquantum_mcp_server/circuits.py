@@ -51,6 +51,17 @@ CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 # parameters", so the input boundary rejects it rather than passing it on.
 VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression", "$complex", "$tensor")
 
+# The key a gate's arbitrary unitary travels under, which differs by format:
+# the qir reader and the Python API call it ``gate``, and serialized IR calls it
+# ``matrix``. A payload using the wrong one for its format is rejected by name
+# rather than silently built without the matrix.
+QIR_MATRIX_KEY = "gate"
+IR_MATRIX_KEY = "matrix"
+
+# The opcode FlagQuantum reserves for an explicit unitary. It carries no
+# signature, which is how ``signature_or_none`` distinguishes it from a built-in.
+MATRIX_OPCODE = "any"
+
 # How deep an expression may nest before the input is refused. An expression
 # nests through ``$expression.args``, so validation recurses; real ansatze
 # nest two or three deep, and the bound keeps a pathological payload from
@@ -121,31 +132,86 @@ def _ir_from_decoded(decoded: Any) -> Any:
             "Use serialize_circuit_tool to produce a valid payload, or pass "
             "circuit_format='qir' for a gate list."
         )
-    _check_ir_parameter_values(decoded)
+    _check_ir_node_lists(decoded)
+    _check_ir_instructions(decoded)
     sdk = load_sdk()
     try:
         return sdk.CircuitIR.from_dict(decoded)
-    except (ValueError, TypeError, KeyError) as exc:
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        # AttributeError is in the list deliberately. The SDK validates the
+        # instruction list but takes ``observables`` and ``measurements`` as
+        # given, so a string where a list belongs reaches ``.get()`` and raises
+        # AttributeError — a caller's mistake reported as a bug in this server.
         raise ToolInputError(f"Circuit IR failed validation: {exc}") from exc
 
 
-def _check_ir_parameter_values(decoded: Mapping[str, Any]) -> None:
-    """Check every instruction's parameter values in a decoded IR payload.
+def _check_ir_instructions(decoded: Mapping[str, Any]) -> None:
+    """Check the parts of an IR payload the SDK leaves unchecked.
 
-    The envelope is validated by the SDK, but a parameter *value* is not: a
-    bare string or a misspelled marker is stored as an opaque value, and the
-    circuit then reports itself as unparameterized. Checking here keeps the two
-    input formats from disagreeing about the same circuit.
+    Two kinds of thing are checked here, both for the same reason: the two input
+    formats must not disagree about the same circuit.
+
+    Parameter *values* are not validated by the SDK, so a bare string or a
+    misspelled marker is stored as an opaque value and the circuit stops
+    reporting itself as parameterized.
+
+    Wire numbers *are* validated, but by coercing: the SDK calls ``int()`` on
+    each one, so ``"1"``, ``true``, ``1.7`` and ``0.9`` all become a wire index
+    — a value that means nothing turned into a circuit that looks fine. The
+    ``qir`` reader refuses all four, so this refuses them too.
     """
     instructions = decoded.get("instructions")
     if not isinstance(instructions, Sequence) or isinstance(instructions, (str, bytes)):
         return
     for position, instruction in enumerate(instructions):
-        if isinstance(instruction, Mapping):
-            _check_parameter_values(
-                instruction.get("params"),
-                str(instruction.get("opcode")),
-                f"Instruction {position}",
+        if not isinstance(instruction, Mapping):
+            continue
+        prefix = f"Instruction {position}"
+        opcode = str(instruction.get("opcode"))
+        _check_ir_wires(instruction.get("wires"), opcode, prefix)
+        _check_parameter_values(instruction.get("params"), opcode, prefix)
+        _check_matrix(opcode, instruction.get(IR_MATRIX_KEY), IR_MATRIX_KEY, prefix)
+
+
+def _check_ir_node_lists(decoded: Mapping[str, Any]) -> None:
+    """Reject an ``observables`` or ``measurements`` value that is not a list.
+
+    The SDK reads both as a sequence of objects and calls ``.get()`` on each
+    entry, so anything else raises AttributeError from inside the SDK. Left
+    alone that reaches the client as INTERNAL_ERROR — "this server has a bug" —
+    when the payload is simply the wrong shape, and neither field has a
+    one-element shorthand to make a bare object a reasonable guess.
+    """
+    for field in ("observables", "measurements"):
+        if field not in decoded:
+            continue
+        value = decoded[field]
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+            raise ToolInputError(
+                f"Circuit IR '{field}' {_describe(value)}; it must be a list of "
+                f'objects, empty when the circuit has none: "{field}": [].'
+            )
+        for position, entry in enumerate(value):
+            if not isinstance(entry, Mapping):
+                raise ToolInputError(
+                    f"Circuit IR '{field}'[{position}] {_describe(entry)}; every "
+                    f"entry must be an object such as "
+                    f'{{"name": "ZZ", "wires": [0, 1]}} for an observable, or '
+                    f'{{"kind": "counts", "wires": [0]}} for a measurement.'
+                )
+
+
+def _check_ir_wires(wires: Any, opcode: str, prefix: str) -> None:
+    """Reject an IR wire list the SDK would coerce into something else."""
+    if not isinstance(wires, Sequence) or isinstance(wires, (str, bytes)):
+        return
+    for wire in wires:
+        if isinstance(wire, bool) or not isinstance(wire, int):
+            raise ToolInputError(
+                f"{prefix} ({opcode!r}) has non-integer wire {wire!r}. The SDK "
+                "would coerce it with int(), so write the wire numbers as "
+                "integers — the qir format refuses the same values, and a "
+                "coerced wire describes a circuit the caller did not write."
             )
 
 
@@ -242,33 +308,79 @@ def _validate_gate(gate: Any, position: int) -> dict[str, Any]:
         wires.append(wire)
     if not wires:
         raise ToolInputError(f"{prefix} ({name!r}) has an empty index; name at least one wire.")
+    _check_qir_key_spellings(gate, name, prefix)
+    _check_known_name(name, gate, prefix)
+    _check_matrix(name, gate.get(QIR_MATRIX_KEY), QIR_MATRIX_KEY, prefix)
+    _check_signature(name, wires, gate.get("parameters"), prefix)
+    _check_parameter_values(gate.get("parameters"), name, prefix)
+    return {**gate, "index": wires}
+
+
+def _check_qir_key_spellings(gate: Mapping[str, Any], name: str, prefix: str) -> None:
+    """Name any IR key spelling a caller used in a qir gate.
+
+    Three of the four keys differ between the formats, and each mismatch fails
+    differently if it is not named. ``params`` is ignored by the SDK, so the
+    gate is built without its angle. ``matrix`` is ignored, so for a built-in
+    name the circuit is a different circuit than the caller asked for. The
+    fourth, ``opcode``, is named in ``_validate_gate`` before the name is known,
+    because the message it produces is the most useful one for a gate that has
+    no ``name`` at all.
+    """
     if "params" in gate and "parameters" not in gate:
         raise ToolInputError(
             f"{prefix} ({name!r}) uses the key 'params'. A qir gate carries its "
             "arguments under 'parameters': "
             '{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}.'
         )
-    _check_known_name(name, gate, prefix)
-    _check_signature(name, wires, gate.get("parameters"), prefix)
-    _check_parameter_values(gate.get("parameters"), name, prefix)
-    return {**gate, "index": wires}
+    if IR_MATRIX_KEY in gate:
+        raise ToolInputError(
+            f"{prefix} ({name!r}) uses the IR spelling 'matrix'. A qir gate "
+            "carries an arbitrary unitary under 'gate': "
+            '{"name": "mygate", "index": [0], "gate": [[1, 0], [0, 1]]}. The '
+            "'matrix' key is ignored here, so the gate would be built without it."
+        )
 
 
 def _check_known_name(name: str, gate: Mapping[str, Any], prefix: str) -> None:
     """Name a gate the SDK does not have, and suggest what was meant.
 
-    A custom opcode is legal — ``any`` carries a matrix under the ``gate`` key —
-    so an unknown name is only an error when the gate carries no matrix to
-    define it. The SDK's own message for this is terse and does not guess.
+    A custom opcode is legal — it carries a matrix under the ``gate`` key — so
+    an unknown name is only an error when the gate carries no matrix to define
+    it. The SDK's own message for this is terse and does not guess.
     """
     if signature_or_none(name) is not None:
         return
-    if gate.get("gate") is not None or gate.get("matrix") is not None:
+    if gate.get(QIR_MATRIX_KEY) is not None:
         return
     raise ToolInputError(
         f"{prefix} ({name!r}) is not a gate in the installed FlagQuantum, and it "
         "carries no matrix. Closest names: "
         f"{closest_names(name)}. Call describe_gate_set_tool for the full list."
+    )
+
+
+def _check_matrix(opcode: str, matrix: Any, key: str, prefix: str) -> None:
+    """Reject a matrix attached to a gate that already has a definition.
+
+    A matrix belongs to an opcode with no built-in meaning, which the SDK calls
+    ``any``. Attached to a built-in name it is ambiguous, and the SDK resolves
+    the ambiguity in the worst way: the matrix is carried in the payload but the
+    opcode's own definition wins, so ``analyze_circuit_tool`` reports the gate
+    under the built-in's name while the emitters refuse to lower it at all. Two
+    tools describing the same circuit as different things is the failure this
+    whole module exists to prevent.
+    """
+    if matrix is None:
+        return
+    if signature_or_none(opcode) is None:
+        return
+    raise ToolInputError(
+        f"{prefix} ({opcode!r}) carries a matrix under {key!r}, but {opcode!r} is "
+        "a built-in gate with its own definition. The matrix does not replace it: "
+        f"analysis reports the gate as {opcode!r} while the emitters refuse to "
+        "lower it. To send an explicit unitary, name the gate "
+        f'"{MATRIX_OPCODE}" — that is the opcode FlagQuantum reserves for it.'
     )
 
 

@@ -318,3 +318,191 @@ def test_the_shape_field_is_carried_but_not_validated(bell_qir: str) -> None:
     assert (
         wrong["circuit"]["content_hash"] != analyze(bell_qir, QIR_FORMAT)["circuit"]["content_hash"]
     )
+
+
+# --- what the SDK coerces, and what it ignores ---
+#
+# The SDK validates the instruction list but does not validate wire *types*: it
+# calls int() on each wire, so "1", true, 1.7 and 0.9 all become a wire index. A
+# value that means nothing turns into a circuit that looks fine. The qir reader
+# refuses all four, so the ir reader does too — the two formats must not
+# disagree about the same circuit, which is the rule the whole module follows.
+
+
+def _ir_payload(**overrides: object) -> str:
+    """A one-gate IR envelope with individual fields overridden."""
+    payload: dict[str, object] = {
+        "kind": "flagquantum.circuit_ir",
+        "version": "1.0",
+        "n_wires": 2,
+        "dtype": "complex64",
+        "shape": [4],
+        "instructions": [
+            {"opcode": "h", "wires": [0], "params": {}, "matrix": None, "metadata": {}}
+        ],
+        "observables": [],
+        "measurements": [],
+        "metadata": {},
+    }
+    payload.update(overrides)
+    return json.dumps(payload)
+
+
+def _with_instruction(instruction: dict[str, object]) -> str:
+    return _ir_payload(instructions=[instruction])
+
+
+@pytest.mark.parametrize("wire", ["0", True, 1.7, 0.9, None, []])
+def test_ir_refuses_a_wire_the_sdk_would_coerce(wire: object) -> None:
+    with pytest.raises(ToolInputError, match="non-integer wire"):
+        resolve_ir(_with_instruction({"opcode": "h", "wires": [wire], "params": {}}), IR_FORMAT)
+
+
+def test_ir_still_accepts_integer_wires() -> None:
+    ir = resolve_ir(_with_instruction({"opcode": "h", "wires": [0], "params": {}}), IR_FORMAT)
+
+    assert ir.instructions[0].wires == (0,)
+
+
+def test_qir_refuses_the_same_wire_values() -> None:
+    """The control for the test above: the two formats must agree."""
+    for wire in ["0", True, 1.7]:
+        with pytest.raises(ToolInputError, match="non-integer wire"):
+            resolve_ir(json.dumps([{"name": "h", "index": [wire]}]), QIR_FORMAT)
+
+
+# --- observables and measurements ---
+#
+# The SDK calls .get() on each entry without checking it is an object, so a
+# string or a bare object raises AttributeError inside the SDK. That used to
+# reach the client as INTERNAL_ERROR — this server reporting a bug when the
+# payload is simply the wrong shape.
+
+
+@pytest.mark.parametrize("field", ["observables", "measurements"])
+@pytest.mark.parametrize("value", ["ZZ", {"name": "ZZ"}, 1, None])
+def test_ir_names_a_malformed_observables_or_measurements_field(field: str, value: object) -> None:
+    with pytest.raises(ToolInputError, match=field):
+        resolve_ir(_ir_payload(**{field: value}), IR_FORMAT)
+
+
+@pytest.mark.parametrize("field", ["observables", "measurements"])
+def test_ir_names_a_malformed_entry_inside_those_fields(field: str) -> None:
+    with pytest.raises(ToolInputError, match=rf"{field}'\[0\]"):
+        resolve_ir(_ir_payload(**{field: ["ZZ"]}), IR_FORMAT)
+
+
+def test_a_real_observable_and_measurement_are_still_accepted() -> None:
+    """The control: the shapes FlagQuantum itself serializes must load."""
+    payload = _ir_payload(
+        observables=[{"name": "ZZ", "wires": [0, 1], "coefficient": 1.0, "metadata": {}}],
+        measurements=[{"kind": "counts", "wires": [0, 1], "shots": 100, "metadata": {}}],
+    )
+
+    ir = resolve_ir(payload, IR_FORMAT)
+
+    assert ir.to_dict()["observables"][0]["name"] == "zz"
+    assert ir.to_dict()["measurements"][0]["kind"] == "counts"
+
+
+# --- a matrix attached to a gate that already has a definition ---
+#
+# A matrix belongs to the opcode the SDK reserves for it, ``any``. Attached to a
+# built-in name the SDK keeps the matrix in the payload but lets the built-in's
+# own definition win, so analyze reports the gate under the built-in's name
+# while the emitters refuse to lower it. Two tools describing the same circuit
+# as different things.
+
+
+IDENTITY = [[1.0, 0.0], [0.0, 1.0]]
+
+
+def test_ir_refuses_a_matrix_on_a_builtin_opcode() -> None:
+    instruction = {"opcode": "h", "wires": [0], "params": {}, "matrix": IDENTITY}
+
+    with pytest.raises(ToolInputError, match="built-in gate"):
+        resolve_ir(_with_instruction(instruction), IR_FORMAT)
+
+
+def test_qir_refuses_a_matrix_on_a_builtin_name() -> None:
+    gate = json.dumps([{"name": "h", "index": [0], "gate": IDENTITY}])
+
+    with pytest.raises(ToolInputError, match="built-in gate"):
+        resolve_ir(gate, QIR_FORMAT)
+
+
+def test_the_refusal_points_at_the_opcode_reserved_for_a_matrix() -> None:
+    instruction = {"opcode": "cx", "wires": [0, 1], "params": {}, "matrix": IDENTITY}
+
+    with pytest.raises(ToolInputError, match='"any"'):
+        resolve_ir(_with_instruction(instruction), IR_FORMAT)
+
+
+def test_the_reserved_opcode_still_takes_a_matrix() -> None:
+    gate = json.dumps([{"name": "any", "index": [0], "gate": IDENTITY}])
+
+    ir = resolve_ir(gate, QIR_FORMAT)
+
+    assert ir.to_dict()["instructions"][0]["matrix"] is not None
+
+
+def test_an_unknown_name_may_still_carry_a_matrix() -> None:
+    """A custom opcode is how a caller names their own unitary."""
+    gate = json.dumps([{"name": "mygate", "index": [0], "gate": IDENTITY}])
+
+    ir = resolve_ir(gate, QIR_FORMAT)
+
+    assert ir.to_dict()["instructions"][0]["opcode"] == "mygate"
+
+
+# --- the matrix key differs by format, and the qir reader ignores the IR one ---
+
+
+def test_qir_names_the_ir_spelling_of_the_matrix_key() -> None:
+    """``Circuit.from_qir`` reads ``gate`` and ignores ``matrix`` entirely.
+
+    So a caller who spells it the IR way, as this server's own IR schema shows
+    it, gets a gate built without the matrix — silently, and for a built-in name
+    that means a different circuit than they asked for.
+    """
+    gate = json.dumps([{"name": "h", "index": [0], "matrix": IDENTITY}])
+
+    with pytest.raises(ToolInputError, match="IR spelling 'matrix'"):
+        resolve_ir(gate, QIR_FORMAT)
+
+
+def test_qir_names_the_ir_spelling_before_complaining_about_the_name() -> None:
+    """A custom name defined only by ``matrix`` must not be reported as unknown.
+
+    The name check used to accept any gate carrying a ``matrix`` key, because it
+    could not tell the two spellings apart; the circuit then failed later with
+    "unknown opcode", which names the wrong problem.
+    """
+    gate = json.dumps([{"name": "mygate", "index": [0], "matrix": IDENTITY}])
+
+    with pytest.raises(ToolInputError, match="IR spelling 'matrix'"):
+        resolve_ir(gate, QIR_FORMAT)
+
+
+def test_the_reserved_matrix_opcode_is_the_one_the_sdk_emits() -> None:
+    """Pins ``MATRIX_OPCODE`` against the SDK rather than trusting the name.
+
+    ``_check_matrix`` allows a matrix only when the opcode has no signature, so
+    it depends on the reserved opcode being outside the built-in manifest. If
+    FlagQuantum ever renamed it, that check would start refusing every explicit
+    unitary instead of only the ambiguous ones — a false positive on legal
+    input, which is the failure mode worth a test.
+    """
+    import flagquantum as fq
+
+    from flagquantum_mcp_server.circuits import MATRIX_OPCODE
+    from flagquantum_mcp_server.gates import signature_or_none
+
+    emitted = fq.Circuit(1).any(0, unitary=IDENTITY).to_ir().to_dict()["instructions"][0]
+
+    assert emitted["opcode"] == MATRIX_OPCODE
+    assert emitted["matrix"] is not None
+    assert signature_or_none(MATRIX_OPCODE) is None, (
+        f"{MATRIX_OPCODE!r} is in the built-in manifest, so _check_matrix would "
+        "refuse every explicit unitary"
+    )
