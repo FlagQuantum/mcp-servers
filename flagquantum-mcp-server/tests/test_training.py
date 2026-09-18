@@ -961,15 +961,21 @@ def test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal(
 
     ``An expectation needs`` sits mid-sentence, so it cannot be anchored to the
     start of a message the way the other three patterns are. It appears in
-    exactly one SDK message, always directly after ``empty. `` — and a caller who
-    passes the same words as a value gets them inside ``is a string ('...')``.
-    Anchoring on the longer context rewrites the SDK's copy and leaves the
-    caller's alone.
+    exactly one message the validator writes, always directly after ``empty. `` —
+    and a caller who passes the same words as a value gets them inside
+    ``is a string ('...')``. Anchoring on the longer context rewrites the
+    validator's copy and leaves the caller's alone.
 
     This replaced a test that asserted the *defect* here, on the recorded belief
     that there was no position to anchor on. The belief was wrong and the test
     caught it: it went red the moment the anchor was added, which is what a
     tripwire is for.
+
+    The last block pins the **boundary** of the fix rather than only its success,
+    because the success was twice described as total and twice measured to be
+    short of it. A literal that contains the anchor *itself* is still rewritten;
+    reaching that takes passing a fragment of the validator's own sentence as a
+    value. If the replace is ever made exact, this is the assertion to invert.
     """
     from flagquantum_mcp_server.training import train_parameters
 
@@ -986,3 +992,11 @@ def test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal(
     message = str(quoted.value)
     assert f"('{phrase}')" in message, message
     assert "('An objective needs a term')" not in message, message
+
+    anchored = "empty. An expectation needs a term"
+    with pytest.raises(ToolInputError) as nested:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": anchored}], "qir", steps=1)
+
+    nested_message = str(nested.value)
+    assert f"('{anchored}')" not in nested_message, nested_message
+    assert "('empty. An objective needs a term')" in nested_message, nested_message

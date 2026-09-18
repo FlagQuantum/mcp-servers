@@ -2937,22 +2937,26 @@ def _in_this_tools_vocabulary(message: str) -> str:
     message containing *both*, and an unanchored replace cannot tell them apart.
     Measured, the unanchored version answered ``('hamiltonian')`` — the caller's
     own value rewritten, in the message whose entire job is to explain it. All
-    three of the SDK's nouns are message prefixes, so all three can be anchored,
-    and after anchoring the caller's literal survives intact in every position it
-    can occupy.
+    three of the validator's nouns are message prefixes, so all three can be
+    anchored, and after anchoring the caller's literal survives intact in every
+    position it can occupy.
 
-    **No residual remains, and the reason the last one was left is worth
-    keeping.** ``An expectation needs`` has no message prefix to anchor on — it
-    sits mid-sentence — so an earlier version of this function replaced it
-    outright, and a caller whose own value was those words had them rewritten.
-    The reasoning recorded at the time was that there was "no position to anchor
-    it to". **That was false, and in the same way the previous one was false:**
-    the phrase appears in exactly one SDK message, always immediately after
-    ``empty. ``, which is a position. Measured, anchoring on that context
-    rewrites the SDK's copy and leaves a caller's literal intact, with the
-    property test still green. The lesson is that "there is nothing to anchor on"
-    is a claim about the messages, and it needs the messages read rather than
-    recalled.
+    **The rename's boundary, measured rather than asserted.** An earlier draft of
+    this paragraph opened "No residual remains", and that absolute was the same
+    species of claim as the two before it: written rather than measured. It is
+    false at the edge. ``An expectation needs`` has no message prefix of its own
+    — it sits mid-sentence — so the replace keys on the context it does have,
+    ``empty. An expectation needs``. That context is a position, and the previous
+    paragraph's "no position to anchor on" was wrong for exactly that reason; but
+    a caller whose value *contains the anchor itself* still has it rewritten.
+    Measured: a coefficient of ``empty. An expectation needs a term`` is echoed as
+    ``empty. An objective needs a term``. That is the whole remaining boundary,
+    and reaching it takes a literal that is itself a fragment of the validator's
+    message. It is pinned by an assertion in
+    ``test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal``
+    rather than left as prose. The lesson this cost two rounds: "there is nothing
+    to anchor on" and "nothing is left" are both claims about the messages, and
+    both need the messages read rather than recalled.
 
     The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
@@ -2972,11 +2976,12 @@ def _in_this_tools_vocabulary(message: str) -> str:
     if message.startswith("This expectation carries"):
         message = "This objective carries" + message[len("This expectation carries") :]
     return message.replace(
-        # The SDK writes this phrase in exactly one message, always directly
-        # after "empty. ": "'terms' is empty. An expectation needs at least one
-        # term". A caller's copy of the same words arrives inside a quoted value
-        # — "is a string ('An expectation needs a term')" — so a context longer
-        # than the bare phrase tells the two apart where the phrase alone cannot.
+        # This repository's validator writes this phrase, in exactly one message
+        # (planning.py, the empty-terms refusal), always directly after
+        # "empty. ": "'terms' is empty. An expectation needs at least one term".
+        # A caller's copy of those words arrives inside a quoted value — "is a
+        # string ('An expectation needs a term')" — so a context longer than the
+        # bare phrase tells the two apart where the phrase alone cannot.
         "empty. An expectation needs",
         "empty. An objective needs",
     )
@@ -3127,15 +3132,21 @@ def test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal(
 
     ``An expectation needs`` sits mid-sentence, so it cannot be anchored to the
     start of a message the way the other three patterns are. It appears in
-    exactly one SDK message, always directly after ``empty. `` — and a caller who
-    passes the same words as a value gets them inside ``is a string ('...')``.
-    Anchoring on the longer context rewrites the SDK's copy and leaves the
-    caller's alone.
+    exactly one message the validator writes, always directly after ``empty. `` —
+    and a caller who passes the same words as a value gets them inside
+    ``is a string ('...')``. Anchoring on the longer context rewrites the
+    validator's copy and leaves the caller's alone.
 
     This replaced a test that asserted the *defect* here, on the recorded belief
     that there was no position to anchor on. The belief was wrong and the test
     caught it: it went red the moment the anchor was added, which is what a
     tripwire is for.
+
+    The last block pins the **boundary** of the fix rather than only its success,
+    because the success was twice described as total and twice measured to be
+    short of it. A literal that contains the anchor *itself* is still rewritten;
+    reaching that takes passing a fragment of the validator's own sentence as a
+    value. If the replace is ever made exact, this is the assertion to invert.
     """
     from flagquantum_mcp_server.training import train_parameters
 
@@ -3152,6 +3163,14 @@ def test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal(
     message = str(quoted.value)
     assert f"('{phrase}')" in message, message
     assert "('An objective needs a term')" not in message, message
+
+    anchored = "empty. An expectation needs a term"
+    with pytest.raises(ToolInputError) as nested:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": anchored}], "qir", steps=1)
+
+    nested_message = str(nested.value)
+    assert f"('{anchored}')" not in nested_message, nested_message
+    assert "('empty. An objective needs a term')" in nested_message, nested_message
 
 
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
