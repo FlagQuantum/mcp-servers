@@ -20,7 +20,8 @@
 - **Mutations are reverted by moving a sidecar back, never by `git checkout`.**
   Each mutation script writes `Path(str(p) + ".mutbak").write_text(before)`
   before it breaks anything, and the restore replaces the file from that
-  sidecar: `pathlib.Path(...).replace(...)`. Not `mv`, which this sandbox
+  sidecar: `pathlib.Path(...).replace(...)`, relative to the directory the
+  mutation block cd'd into. Not `mv`, which this sandbox
   refuses when compounded after a `cd`; and not `git checkout <path>`, which
   reverts the file to HEAD. Every mutation step runs *before* its task's commit,
   so a checkout would discard the task's own work along with the mutation,
@@ -280,7 +281,7 @@ PY
 Expected: FAIL — `test_an_all_identity_term_is_refused_by_its_position` reports that no error was raised, or a length test does. Then restore:
 
 ```bash
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/planning.py'))"
 ```
 
 If the suite passes with the validation removed, the extraction is decorative and the terms are being checked somewhere else — find out where before continuing.
@@ -561,7 +562,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_simulation.py -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/preconditions.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/preconditions.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/preconditions.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/preconditions.py'))"
 ```
 
 Expected: FAIL on the observable-refusal test before the restore. If it passes, `simulation.py` is still refusing on its own and the move is incomplete.
@@ -729,7 +730,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_budget -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/limits.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/limits.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/limits.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/limits.py'))"
 ```
 
 Expected: FAIL on the malformed-value test. A bound that reads `"0"` as zero would refuse every call for a deployment that meant "unlimited", which is the failure the fallback exists to prevent.
@@ -1449,27 +1450,31 @@ def test_the_prediction_is_computed_without_running_anything() -> None:
 
 
 def _layered_qir(n_wires: int, layers: int = 1) -> list[dict[str, object]]:
-    """An ry/cx/rz ansatz as a gate list, one ``$parameter`` per rotation."""
+    """An ry/cx/rz ansatz as a gate list, one ``$parameter`` per rotation.
+
+    Written with ``extend`` rather than a loop of ``append`` because ruff's
+    PERF401 says so, and ``tests/**`` in the shared config ignores only S101,
+    PLR2004 and SLF001.
+    """
     gates: list[dict[str, object]] = []
     for layer in range(layers):
-        for wire in range(n_wires):
-            gates.append(
-                {
-                    "name": "ry",
-                    "index": [wire],
-                    "parameters": {"theta": {"$parameter": f"t{layer}_{wire}"}},
-                }
-            )
-        for wire in range(n_wires - 1):
-            gates.append({"name": "cx", "index": [wire, wire + 1]})
-        for wire in range(n_wires):
-            gates.append(
-                {
-                    "name": "rz",
-                    "index": [wire],
-                    "parameters": {"theta": {"$parameter": f"u{layer}_{wire}"}},
-                }
-            )
+        gates.extend(
+            {
+                "name": "ry",
+                "index": [wire],
+                "parameters": {"theta": {"$parameter": f"t{layer}_{wire}"}},
+            }
+            for wire in range(n_wires)
+        )
+        gates.extend({"name": "cx", "index": [wire, wire + 1]} for wire in range(n_wires - 1))
+        gates.extend(
+            {
+                "name": "rz",
+                "index": [wire],
+                "parameters": {"theta": {"$parameter": f"u{layer}_{wire}"}},
+            }
+            for wire in range(n_wires)
+        )
     return gates
 ```
 
@@ -1511,8 +1516,13 @@ def predict_seconds(ir: Any, steps: int) -> float:
     A single coefficient cannot follow the true curve, which falls from 1.0e-5
     per instruction-state at four qubits to 2.1e-8 at twenty and rises again to
     5.7e-8 at twenty-four as the state stops fitting where it used to. The
-    coefficient clears the highest point rather than the average one, which
-    makes this 3-5x pessimistic through the middle.
+    coefficient clears the highest point rather than the average one.
+
+    Where that leaves the margin, over every width it was calibrated at: 11x at
+    four qubits and 4.9x at eight, where the floor is doing all the work; 2.0x
+    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest and
+    the one that matters least, since a single step there is 68 s and the budget
+    refuses every run above two steps anyway.
 
     Args:
         ir: A validated ``CircuitIR``.
@@ -1524,7 +1534,7 @@ def predict_seconds(ir: Any, steps: int) -> float:
     """
     per_step = max(
         MIN_STEP_SECONDS,
-        len(ir.instructions) * 2 ** int(ir.n_wires) * STEP_COST_COEFFICIENT,
+        len(ir.instructions) * 2.0 ** int(ir.n_wires) * STEP_COST_COEFFICIENT,
     )
     return STARTUP_SECONDS + steps * per_step
 ```
@@ -1550,7 +1560,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 Expected: FAIL, naming the width whose prediction fell below its measurement. Then confirm the floor is load-bearing the same way:
@@ -1567,7 +1577,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 Expected: FAIL at 4 and 8 qubits.
@@ -1790,7 +1800,7 @@ from flagquantum_mcp_server.training import hamiltonian_from_terms
 term = hamiltonian_from_terms([{'pauli': 'IX'}], n_wires=2).terms[0]
 print('ops after the SDK normalized it:', term.ops)
 "
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 `_normalize_pauli` in the SDK filters identities out of its `ops` tuple, so the
@@ -1842,7 +1852,7 @@ H = hamiltonian_from_terms([{'pauli': 'ZZ', 'coefficient': -1.0}, {'pauli': 'II'
 print('objective built with an all-identity term:', H)
 print('its ops:', [t.ops for t in H.terms])
 "
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/planning.py'))"
 ```
 
 Expected, and measured before this plan was written: the pytest run FAILS on
@@ -2415,7 +2425,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 Expected: FAIL on `test_the_hamiltonian_reaches_the_objective` — the run converges to `-1.0` instead of `-2.236`. If it passes, the policy is being set somewhere else and this tool is not the thing under test.
@@ -2437,7 +2447,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k final_loss -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 Expected: FAIL on `test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before`.
@@ -2463,7 +2473,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k budget -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
 Expected: FAIL on `test_a_run_past_the_budget_is_refused_before_any_work_starts`.
@@ -2916,7 +2926,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_tool_wiring.py -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/server.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/server.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/server.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/server.py'))"
 ```
 
 Expected: FAIL on the `train_parameters_tool` case, because the starting values no longer reach the optimizer.
@@ -3040,7 +3050,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_dependencies -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/tests/test_api_contract.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/tests/test_api_contract.py'))"
+python3 -c "import pathlib; pathlib.Path('tests/test_api_contract.py.mutbak').replace(pathlib.Path('tests/test_api_contract.py'))"
 ```
 
 Expected: FAIL before the restore.
