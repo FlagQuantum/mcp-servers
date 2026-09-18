@@ -679,18 +679,20 @@ def test_a_run_inside_the_budget_is_not_refused(monkeypatch: pytest.MonkeyPatch)
 # the later wins, and pytest would then collect only one of them.
 
 
-def test_a_non_finite_starting_value_is_refused() -> None:
-    """NaN reaches the optimizer and comes back as a successful run of NaN.
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 10**400])
+def test_a_non_finite_starting_value_is_refused(bad: float) -> None:
+    """A starting value that is not a finite real reaches the optimizer otherwise.
 
     Measured: without this refusal, ``values={"t0": nan}`` returns
-    ``status: "success"`` with every loss and every returned parameter NaN.
-    ``json.loads`` accepts the ``NaN`` and ``Infinity`` tokens, so a payload
-    carrying one is not rejected before it gets here.
+    ``status: "success"`` with every loss and every returned parameter NaN, and
+    ``values={"t0": 10**400}`` returns an internal error. ``json.loads`` accepts
+    the ``NaN`` and ``Infinity`` tokens and turns an integer literal into a
+    Python ``int``, so no payload carrying one is stopped on the way in.
     """
     from flagquantum_mcp_server.training import train_parameters
 
     with pytest.raises(ToolInputError) as caught:
-        train_parameters(ANGLED, TFIM2, "qir", values={"t0": float("nan"), "t1": 0.1})
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": bad, "t1": 0.1})
 
     assert "t0" in str(caught.value)
 
