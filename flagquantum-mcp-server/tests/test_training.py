@@ -803,3 +803,63 @@ def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -
     message = str(caught.value)
     assert "observables" in message
     assert "hamiltonian" in message
+
+
+def test_no_refusal_from_this_tool_says_a_noun_the_caller_did_not_write() -> None:
+    """Every refusal, in the caller's vocabulary — checked as a property.
+
+    Every message below comes from the shared validator, which speaks the
+    vocabulary of an ``expectation`` output. A caller who wrote ``hamiltonian``
+    must never be told about ``terms``, ``terms[0]`` or an ``expectation``:
+    those name something they never typed, and a message that has to be
+    translated is one that cannot be acted on.
+
+    Checked over every malformed shape at once rather than phrase by phrase,
+    because phrase-by-phrase is exactly what let the first version miss the
+    term-level refusals — it replaced the quoted field name, and ``terms[0]``
+    is unquoted.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    malformed = [
+        None,
+        [],
+        [{"coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": 1.0, "extra": 1}],
+        [{"pauli": "ZZZ", "coefficient": 1.0}],
+        [{"pauli": "II", "coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": "x"}],
+        "ZZ",
+    ]
+
+    for objective in malformed:
+        with pytest.raises(ToolInputError) as caught:
+            train_parameters(ANGLED, objective, "qir", steps=1)
+        message = str(caught.value)
+        assert "hamiltonian" in message, (objective, message)
+        assert "terms" not in message, (objective, message)
+        assert "expectation" not in message, (objective, message)
+
+
+def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rename must not swallow the bound's own error code.
+
+    ``ToolLimitError`` subclasses ``ToolInputError``, so a bare
+    ``except ToolInputError`` around the builder catches it and re-raises it as
+    the base class. Measured: the caller then sees ``INVALID_INPUT`` where the
+    bound had raised ``LIMIT_EXCEEDED``. The errors module exists so an agent can
+    branch on the code rather than parse prose, and this collapses two branches
+    into one.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS", "2")
+
+    with pytest.raises(ToolLimitError) as caught:
+        train_parameters(ANGLED, [{"pauli": "Z", "coefficient": 1.0}] * 5, "qir", steps=1)
+
+    assert caught.value.code == "LIMIT_EXCEEDED"
+    assert "expectation" not in str(caught.value)
+    assert "objective" in str(caught.value)

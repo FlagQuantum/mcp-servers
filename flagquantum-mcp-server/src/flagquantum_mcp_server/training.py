@@ -184,23 +184,49 @@ def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
         ToolInputError: If the objective is missing or unusable.
         ToolLimitError: If it carries more terms than the bound allows.
     """
-    if hamiltonian is None:
-        raise ToolInputError(
-            "hamiltonian is required. Without an objective the value the SDK "
-            "reports is not an energy, and training it would minimise an "
-            "unnamed quantity to convergence and hand back a plausible number. "
-            'Give the Pauli sum to minimise: [{"pauli": "ZZ", "coefficient": '
-            '1.0}, {"pauli": "XI", "coefficient": -0.5}].'
-        )
-    if isinstance(hamiltonian, (list, tuple)) and not hamiltonian:
-        raise ToolInputError(
-            "hamiltonian is empty. A training objective needs at least one "
-            'term, such as [{"pauli": "ZZ", "coefficient": 1.0}].'
-        )
     try:
         return hamiltonian_from_terms(hamiltonian, n_wires=n_wires)
+    except ToolLimitError as exc:
+        raise ToolLimitError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolInputError as exc:
-        raise ToolInputError(str(exc).replace("'terms'", "'hamiltonian'")) from exc
+        raise ToolInputError(_in_this_tools_vocabulary(str(exc))) from exc
+
+
+def _in_this_tools_vocabulary(message: str) -> str:
+    """Restate a shared refusal in the nouns the training caller wrote.
+
+    ``validate_pauli_terms`` speaks the vocabulary of an ``expectation`` output:
+    the list is ``terms``, an entry is ``terms[0]``, and the whole thing is an
+    "expectation". Reached from ``train_parameters`` the caller wrote
+    ``hamiltonian`` and an objective, so every one of those nouns names something
+    they never typed. The refusals themselves are unchanged; only the nouns move.
+
+    **Four shapes, not one, and that was not obvious.** The first version of this
+    replaced ``'terms'`` alone — the quoted field name. Every *term-level*
+    message says ``terms[0]`` unquoted, and those are the majority, because a
+    malformed term is the common case. Measured: the field-level pair were
+    renamed and all six term-level refusals still said ``terms``.
+
+    **The two phrases are named, not replaced wholesale.** A blanket
+    ``expectation`` -> ``objective`` would also rewrite the message for an
+    ``expectation`` *output*, which is the one place the word is correct. This
+    function only ever runs on the training path, so that cannot happen today —
+    but a phrase list that says what it covers is auditable and a blanket replace
+    is not. If the validator gains a fifth shape, add it here; the property test
+    below is what will notice.
+
+    Args:
+        message: A refusal's text, from the shared validator.
+
+    Returns:
+        The same refusal, in this tool's nouns.
+    """
+    return (
+        message.replace("'terms'", "'hamiltonian'")
+        .replace("terms[", "hamiltonian[")
+        .replace("An expectation needs", "An objective needs")
+        .replace("This expectation carries", "This objective carries")
+    )
 
 
 def load_algorithms() -> Any:
