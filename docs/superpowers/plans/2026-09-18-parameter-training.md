@@ -2922,23 +2922,33 @@ def _in_this_tools_vocabulary(message: str) -> str:
     ``hamiltonian`` and an objective, so every one of those nouns names something
     they never typed. The refusals themselves are unchanged; only the nouns move.
 
-    **Every message this reaches was measured.** The validator raises eight
-    malformed-input refusals plus the bound's; they open with ``'terms' is ...``
-    (twice), ``terms[0] ...`` (five times), ``An expectation needs ...`` and
-    ``This expectation carries ...``. The four edits below cover all four
-    openings, and a test asserts the property over all eight shapes rather than
-    trusting the list.
+    **Every message this reaches was counted, not estimated.** Nine
+    malformed-input refusals plus the bound's. Two open with ``'terms' is``,
+    seven with ``terms[0]``, and the bound's with ``This expectation carries``;
+    a fourth phrase, ``An expectation needs``, sits mid-sentence inside the
+    second. An earlier version of this docstring said "eight ... (twice) ...
+    (five times)" and every one of those numbers was wrong.
 
-    **The field name is anchored to the start of the message, and that is not
-    cosmetic.** The validator quotes its own field name — ``'terms' is NoneType``
-    — and it also quotes the caller's offending value back at them: ``has a
-    coefficient that is a string ('terms')``. A caller who passes the literal
-    string ``terms`` produces a message containing *both*, and an unanchored
-    replace cannot tell them apart. Measured, the unanchored version answered
-    ``('hamiltonian')`` — the caller's own value rewritten, in the message whose
-    entire job is to tell them what was wrong with it. Anchoring removes that
-    case. A literal containing ``terms[`` is still echoed renamed; that residual
-    is pinned by a test rather than left to be discovered.
+    **Three of the four patterns are anchored to the start of the message, and
+    that is not cosmetic.** The validator quotes its own nouns — ``'terms' is
+    NoneType``, ``terms[0] has no 'pauli' string`` — and it also quotes the
+    caller's offending value back at them: ``has a coefficient that is a string
+    ('terms')``. A caller who passes the literal string ``terms`` produces a
+    message containing *both*, and an unanchored replace cannot tell them apart.
+    Measured, the unanchored version answered ``('hamiltonian')`` — the caller's
+    own value rewritten, in the message whose entire job is to explain it. All
+    three of the SDK's nouns are message prefixes, so all three can be anchored,
+    and after anchoring the caller's literal survives intact in every position it
+    can occupy.
+
+    **One phrase is left unanchored, and it is the residual.** ``An expectation
+    needs`` sits mid-sentence with no fixed position to key on, so a caller whose
+    own value is the literal string ``An expectation needs a term`` still has it
+    echoed as ``An objective needs a term``. It is pinned by a test that asserts
+    the defective behaviour on purpose. The alternative — teaching the shared
+    validator to take its nouns as parameters — would change an interface that
+    the ``expectation`` output path also uses, to fix a message about an input no
+    caller will send. Recorded, not fixed, with the reasoning in the test.
 
     The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
@@ -2952,11 +2962,12 @@ def _in_this_tools_vocabulary(message: str) -> str:
     """
     if message.startswith("'terms'"):
         message = "'hamiltonian'" + message[len("'terms'") :]
-    return (
-        message.replace("terms[", "hamiltonian[")
-        .replace("An expectation needs", "An objective needs")
-        .replace("This expectation carries", "This objective carries")
-    )
+    if message.startswith("terms["):
+        close = message.index("]")
+        message = "hamiltonian" + message[len("terms") : close + 1] + message[close + 1 :]
+    if message.startswith("This expectation carries"):
+        message = "This objective carries" + message[len("This expectation carries") :]
+    return message.replace("An expectation needs", "An objective needs")
 ```
 
 Then change the call in `train_parameters`. Replace exactly this line:
@@ -3054,50 +3065,75 @@ def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
     assert "hamiltonian[0]" in message, message
 
 
-def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> None:
-    """The one input the rename still gets wrong, written down as a test.
+def test_a_literal_is_echoed_unchanged_in_every_position_it_can_occupy() -> None:
+    """A caller's value is never rewritten by a message about that value.
 
-    ``terms[`` is anchored to nothing: it is the SDK's noun inside
-    ``terms[0] has no 'pauli' string``, and it appears mid-message, so there is
-    no position to anchor it to. A caller whose own value is the literal string
-    ``terms[`` therefore has it echoed back as ``hamiltonian[`` — the same defect
-    the anchor fixed for the other shape, one step further out.
+    The SDK's nouns and a caller's literals meet in the same message: the
+    validator says ``terms[0] has no 'pauli' string`` and, for a caller who
+    passed the literal string ``terms[``, it says ``terms[0] 'pauli' 'terms['
+    covers 6 wires``. A blanket replace cannot tell those apart.
 
-    This asserts the defective behaviour on purpose. It is here so the residual
-    is a fact in the suite rather than a sentence in a docstring, and so that
-    anyone who fixes it gets a red test telling them what changed. Measured
-    wording; if the rename is ever rebuilt to take the noun as a parameter
-    instead of substituting text, this test is what should be deleted.
+    Measured across all three positions a literal can occupy — the pauli string,
+    the coefficient, and a term's key — after the three anchored patterns:
+    every one now keeps the caller's text intact.
 
-    **Measured across every position a caller's literal can land, and the split
-    is worth knowing:**
+    This test replaced one that asserted the *defect* here. Both bracket and
+    field-name forms are anchored now, so the defect is gone and the tripwire
+    fired, which is what it was for. The one surviving residual is the phrase
+    form, and it has its own test below.
+    """
+    from flagquantum_mcp_server.training import train_parameters
 
-    | caller's value | echoed as | |
-    | --- | --- | --- |
-    | ``pauli="terms["`` | ``'hamiltonian['`` | wrong |
-    | ``coefficient="terms["`` | ``('hamiltonian[')`` | wrong |
-    | a key ``"terms["`` | ``['hamiltonian[']`` | wrong |
-    | ``pauli="terms"`` | ``'terms'`` | correct |
-    | ``coefficient="terms"`` | ``('terms')`` | correct |
-    | a key ``"terms"`` | ``['terms']`` | correct |
+    cases = [
+        [{"pauli": "terms[", "coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": "terms["}],
+        [{"pauli": "ZZ", "coefficient": 1.0, "terms[": 1}],
+        [{"pauli": "terms", "coefficient": 1.0}],
+        [{"pauli": "ZZ", "coefficient": "terms"}],
+        [{"pauli": "ZZ", "coefficient": 1.0, "terms": 1}],
+    ]
 
-    The three ``terms`` cases are correct only because the field-name pattern is
-    anchored to the start of the message. That anchor is a positional accident:
-    a validator that ever reorders a refusal puts the field name back in the
-    middle and silently breaks all three. Worth knowing, not worth fixing here —
-    which is why it is written down.
+    for objective in cases:
+        with pytest.raises(ToolInputError) as caught:
+            train_parameters(ANGLED, objective, "qir", steps=1)
+        message = str(caught.value)
+        assert "hamiltonian" in message, (objective, message)
+        # The SDK's nouns are renamed; the caller's are not.
+        assert "'terms'" not in message, (objective, message)
+        assert "('hamiltonian" not in message, (objective, message)
+        assert "['hamiltonian" not in message, (objective, message)
+        assert "terms['" not in message, (objective, message)
+
+
+def test_a_phrase_shaped_literal_is_the_one_recorded_residual() -> None:
+    """The single input the rename still gets wrong, written down as a test.
+
+    ``An expectation needs`` is the one pattern with no position to anchor on: it
+    sits mid-sentence inside ``'terms' is empty. An expectation needs at least
+    one term``, and a caller whose own value is that phrase therefore has it
+    echoed as ``An objective needs``.
+
+    This asserts the defective behaviour on purpose, so the residual is a fact in
+    the suite rather than a sentence in a docstring, and so anyone who fixes it
+    gets a red test telling them what changed. **This is the test to delete if
+    the rename is ever rebuilt to take the nouns as parameters** — which is the
+    real fix, and is exactly why it is not done here: it would change an
+    interface the ``expectation`` output path shares, to correct a message about
+    an input no caller will send.
     """
     from flagquantum_mcp_server.training import train_parameters
 
     with pytest.raises(ToolInputError) as caught:
-        train_parameters(ANGLED, [{"pauli": "terms[", "coefficient": 1.0}], "qir", steps=1)
+        train_parameters(
+            ANGLED,
+            [{"pauli": "ZZ", "coefficient": "An expectation needs a term"}],
+            "qir",
+            steps=1,
+        )
 
     message = str(caught.value)
-    assert "'hamiltonian['" in message, message
-    # Not `assert "terms[0]" in message`: the replace takes BOTH bracket
-    # occurrences, so `terms[0]` never survives to be asserted on. The
-    # field noun this test can reach is the renamed one.
-    assert "hamiltonian[0]" in message, message
+    assert "('An objective needs a term')" in message, message
+    assert "('An expectation needs a term')" not in message, message
 
 
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
@@ -3135,8 +3171,11 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds thirteen tests; read the count off the output and
-check the def count rose by thirteen. (Three of the refusals it would otherwise add
+Expected: PASS. This step adds fourteen tests; read the count off the output and
+check the def count rose by fourteen. One of them replaces a test that asserted
+the bracket defect, which this round fixes — so if you are following the brief's
+Step 1 verbatim and the file already has that test, remove it rather than adding
+beside it. Two `def`s of one name shadow, and the second silently never runs. (Three of the refusals it would otherwise add
 are already in the file, shipped with Task 7 — see the note at the top of this
 task. One of the ten is parametrized, so the collected count rises by more than
 the def count; that is what Step 3 of Task 7 saw too.)
