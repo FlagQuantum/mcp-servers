@@ -165,6 +165,40 @@ def test_the_emission_hash_identifies_the_source_circuit(bell_qir: str) -> None:
     assert emitted["content_hash"] == analyze(bell_qir, "qir")["circuit"]["content_hash"]
 
 
+def test_a_source_measurement_does_not_change_the_emitted_text() -> None:
+    """The text is chosen by ``result_wires`` alone.
+
+    Worth pinning because it is the natural thing to expect otherwise: declaring
+    measurements in the IR looks like it should decide what gets measured.
+    """
+
+    def _ir(measurements: list[dict[str, object]]) -> str:
+        return json.dumps(
+            {
+                "kind": "flagquantum.circuit_ir",
+                "version": "1.0",
+                "n_wires": 2,
+                "dtype": "complex64",
+                "shape": [4],
+                "instructions": [
+                    {"opcode": "h", "wires": [0], "params": {}, "matrix": None, "metadata": {}},
+                    {"opcode": "cx", "wires": [0, 1], "params": {}, "matrix": None, "metadata": {}},
+                ],
+                "observables": [],
+                "measurements": measurements,
+                "metadata": {},
+            }
+        )
+
+    without = emit_openqasm(_ir([]), "ir")["text"]
+    declared = emit_openqasm(_ir([{"kind": "counts", "wires": [0, 1], "shots": None}]), "ir")[
+        "text"
+    ]
+
+    assert without == declared
+    assert "measure" in declared
+
+
 def test_qcis_appends_no_measurement(bell_qir: str) -> None:
     """The asymmetry is deliberate: only the QASM emitters measure by default."""
     text = emit_qcis(bell_qir, "qir")["text"]

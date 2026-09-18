@@ -191,9 +191,9 @@ it affects both input formats equally.
 `emit_openqasm_tool` measures every wire unless `result_wires` names the ones you
 want, so the emitted program normally carries measurements the source circuit
 does not — a Bell circuit with no `measurements` still emits `c = measure q;`.
-The `content_hash` in the result identifies the **source circuit**, not the
-emitted text; the two agree only when the source already measures everything.
-`emit_qcis_tool` appends nothing.
+Declaring measurements in the source IR changes nothing: the emitted text is
+chosen by `result_wires` alone. The `content_hash` in the result identifies the
+**source circuit**, not the emitted text. `emit_qcis_tool` appends nothing.
 
 ### On `content_hash`
 
