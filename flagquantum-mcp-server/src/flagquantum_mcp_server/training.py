@@ -112,6 +112,51 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     return build
 
 
+# The budget model's three constants. Calibrated from warm per-step measurements
+# at 4, 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits; the table is in the design
+# document and every point is pinned by a test. The model over-predicts at all
+# of them, by 1.7x at the worst.
+STARTUP_SECONDS = 0.5
+MIN_STEP_SECONDS = 0.02
+STEP_COST_COEFFICIENT = 1e-7
+
+
+def predict_seconds(ir: Any, steps: int) -> float:
+    """Predict how long ``steps`` updates will take, in seconds.
+
+    Two terms, because cost has two regimes. ``STARTUP_SECONDS`` is the one-time
+    ``make_fx`` trace ``Module`` performs when it first compiles the builder.
+    The rest is work: gates applied against a state of ``2 ** n_wires``
+    amplitudes, so it is the product of the two, floored at the dispatch cost
+    that dominates at small widths.
+
+    The floor is generous on purpose. It is 20 ms where 1.8 ms was measured at
+    four qubits, which at the default 60-second budget is the difference between
+    a caller being allowed three thousand steps and thirty thousand. Three
+    thousand is already more than anyone reads, and a model that is an upper
+    bound everywhere is worth more than one that is tight at the bottom.
+
+    A single coefficient cannot follow the true curve, which falls from 1.0e-5
+    per instruction-state at four qubits to 2.1e-8 at twenty and rises again to
+    5.7e-8 at twenty-four as the state stops fitting where it used to. The
+    coefficient clears the highest point rather than the average one, which
+    makes this 3-5x pessimistic through the middle.
+
+    Args:
+        ir: A validated ``CircuitIR``.
+        steps: The number of updates requested.
+
+    Returns:
+        A prediction in seconds. An estimate rather than a measurement of the
+        caller's machine.
+    """
+    per_step = max(
+        MIN_STEP_SECONDS,
+        len(ir.instructions) * 2.0 ** int(ir.n_wires) * STEP_COST_COEFFICIENT,
+    )
+    return STARTUP_SECONDS + steps * per_step
+
+
 def _argument(value: Any, parameters: Mapping[str, Any], sdk: Any) -> Any:
     """Resolve one live gate argument against the parameter mapping.
 

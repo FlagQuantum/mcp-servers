@@ -284,3 +284,101 @@ def test_a_replayed_parameterized_circuit_evaluates_the_same_as_a_bound_one() ->
     got = fq.run(replayed, outputs=[fq.probabilities([0, 1])]).measurements[0].value
 
     assert got == pytest.approx(want, abs=1e-6)
+
+
+# --- the budget model ---
+
+
+def test_the_prediction_grows_with_steps_and_with_width() -> None:
+    from flagquantum_mcp_server.training import predict_seconds
+
+    narrow = _ir(json.dumps([{"name": "h", "index": [0]}]))
+    wide = _ir(json.dumps(_layered_qir(16)))
+
+    assert predict_seconds(wide, 10) > predict_seconds(wide, 5)
+    assert predict_seconds(wide, 5) > predict_seconds(narrow, 5)
+
+
+def test_the_prediction_over_predicts_every_point_it_was_calibrated_from() -> None:
+    """The model's only job is to be an upper bound, so this is the whole test.
+
+    Measured per-step costs, warm, from the design's table. A model that
+    under-predicts anywhere here declines to protect the caller exactly where
+    the caller most needs it.
+    """
+    from flagquantum_mcp_server.training import STARTUP_SECONDS, predict_seconds
+
+    measured = [
+        (4, 1, 0.0018),
+        (8, 1, 0.0041),
+        (12, 1, 0.0090),
+        (13, 1, 0.0155),
+        (14, 1, 0.0207),
+        (15, 1, 0.0421),
+        (16, 1, 0.0852),
+        (20, 1, 1.290),
+        (22, 1, 8.56),
+        (24, 1, 68.5),
+    ]
+    for n_wires, layers, per_step in measured:
+        ir = _ir(json.dumps(_layered_qir(n_wires, layers)))
+        # Strip the one-time startup, which belongs to no single step. Read from
+        # the module rather than written as 0.5, so that changing the constant
+        # changes what this compares instead of quietly comparing nothing.
+        predicted = predict_seconds(ir, 1) - STARTUP_SECONDS
+
+        assert predicted > per_step, (
+            f"{n_wires} qubits: predicted {predicted:.4f}s per step against "
+            f"{per_step:.4f}s measured"
+        )
+
+
+def test_the_floor_is_what_covers_the_smallest_width() -> None:
+    """At four qubits the state term is negligible and dispatch is the whole cost."""
+    from flagquantum_mcp_server.training import (
+        MIN_STEP_SECONDS,
+        STARTUP_SECONDS,
+        predict_seconds,
+    )
+
+    ir = _ir(json.dumps(_layered_qir(4)))
+
+    assert predict_seconds(ir, 1) - STARTUP_SECONDS == pytest.approx(MIN_STEP_SECONDS)
+
+
+def test_the_prediction_is_computed_without_running_anything() -> None:
+    """It is arithmetic on the instruction count, so it costs nothing to ask."""
+    import time
+
+    from flagquantum_mcp_server.training import predict_seconds
+
+    ir = _ir(json.dumps(_layered_qir(24)))
+    started = time.perf_counter()
+    predict_seconds(ir, 100_000)
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 0.05
+
+
+def _layered_qir(n_wires: int, layers: int = 1) -> list[dict[str, object]]:
+    """An ry/cx/rz ansatz as a gate list, one ``$parameter`` per rotation."""
+    gates: list[dict[str, object]] = []
+    for layer in range(layers):
+        gates.extend(
+            {
+                "name": "ry",
+                "index": [wire],
+                "parameters": {"theta": {"$parameter": f"t{layer}_{wire}"}},
+            }
+            for wire in range(n_wires)
+        )
+        gates.extend({"name": "cx", "index": [wire, wire + 1]} for wire in range(n_wires - 1))
+        gates.extend(
+            {
+                "name": "rz",
+                "index": [wire],
+                "parameters": {"theta": {"$parameter": f"u{layer}_{wire}"}},
+            }
+            for wire in range(n_wires)
+        )
+    return gates
