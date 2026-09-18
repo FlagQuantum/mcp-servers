@@ -2842,11 +2842,18 @@ Registering the tool is what makes it real: a module nobody can call is not a fe
 
 - [ ] **Step 1: Write the failing test**
 
-Add to `flagquantum-mcp-server/tests/surface.py`, in `EXPECTED_TOOLS`, keeping the alphabetical order the set already has:
+Add to `flagquantum-mcp-server/tests/surface.py`, to `EXPECTED_TOOLS`:
 
 ```python
         "train_parameters_tool",
 ```
+
+`EXPECTED_TOOLS` is a `frozenset`, so placement carries no meaning and the
+existing entries are grouped by kind (circuit tools, then emitters, then
+execution, then the describe/inspect family) rather than sorted. Put the new name
+at the end and leave the rest alone — **do not re-sort the set.** Reordering it
+would produce a large diff that changes nothing, in the one file whose whole
+purpose is to be readable as the server's surface.
 
 Run: `../.venv/bin/pytest tests/test_server_contract.py tests/test_server_process.py -q`
 Expected: FAIL — the tools the server serves are now one short of the declared surface.
