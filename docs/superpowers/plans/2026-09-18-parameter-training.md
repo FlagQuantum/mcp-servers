@@ -2836,32 +2836,32 @@ def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -
 
 - [ ] **Step 2: Run them to verify they fail**
 
-Run: `../.venv/bin/pytest tests/test_training.py -k "refused or no_parameters" -q`
-Expected: **four** of the nine fail, and it is worth knowing which four and why,
-because the rest already pass and that is not a mistake in your run.
+Run: `../.venv/bin/pytest tests/test_training.py -q`
+Expected: **exactly two** of the eight fail, and I measured which:
 
-Failing, and each for a different reason:
+- `test_a_missing_hamiltonian_is_refused`
+- `test_an_empty_hamiltonian_is_refused`
 
-- `test_a_missing_hamiltonian_is_refused` — reaches `validate_pauli_terms(None)`
-  and gets a message about `'terms'`, which never says `hamiltonian`.
-- `test_an_empty_hamiltonian_is_refused` — same, and this is the one to read
-  carefully: the shared validator's message is `'terms' is empty`, so a test
-  asserting only the word `empty` passes **before this task changes anything**.
-  That is why it asserts `hamiltonian` is present and `'terms'` is absent.
-- `test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian` —
-  nothing on this path reads the `observables` field yet.
-- `test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused` or
-  `test_a_missing_value_is_refused`'s message wording may differ from the assert;
-  read what you get.
+Both for the same reason, which is this task's whole job: the call reaches
+`validate_pauli_terms`, whose messages are written in the vocabulary of the
+`outputs` argument, so they say `'terms'` — a field the caller never typed. Note
+the second one carefully: the shared validator's message is `'terms' is empty`,
+so a test asserting only the word `empty` would pass **before this task changes
+anything**. That is why it asserts `hamiltonian` is present and `'terms'` is
+absent.
 
-Passing already, because Task 7 ships these refusals in the same code path that
-must perform them: the no-parameters case, the step count, the learning rate, and
-the budget. **That is not a gap to close** — do not delete or move them to make
-this task's tests fail. Step 2 is a check on your reading, not a checklist you
-are required to turn red. Say in your report which were already green.
+**The other six already pass, and that is not a mistake in your run.** Task 7
+ships those refusals in the same code path that must perform them: the
+no-parameters case, the step count, the learning rate, the budget, and the
+observables check — the last of which already names `hamiltonian` in its remedy.
+Do not delete, move, or weaken any of them to make this task's tests red. Step 2
+is a check on your reading, not a checklist you are required to turn red. Say in
+your report which were already green.
 
-A refusal that names the wrong field is the failure this task is for; a refusal
-that already names the right one is finished work.
+An earlier draft of this step said "four of the nine"; both numbers were wrong,
+and it named two tests as failing that pass. A wrong expectation is worse than no
+expectation, because a run that disagrees with it looks like a defect in the
+code.
 
 - [ ] **Step 3: Name the `hamiltonian` argument in its own refusals**
 
@@ -2907,7 +2907,19 @@ def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
         raise ToolInputError(str(exc).replace("'terms'", "'hamiltonian'")) from exc
 ```
 
-Change `train_parameters` to call `_objective(hamiltonian, n_wires=int(ir.n_wires))`.
+Then change the call in `train_parameters`. Replace exactly this line:
+
+```python
+    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))
+```
+
+with:
+
+```python
+    objective = _objective(hamiltonian, n_wires=int(ir.n_wires))
+```
+
+`hamiltonian_from_terms` stays imported — `_objective` calls it.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
@@ -2923,7 +2935,7 @@ Each refusal is a guard clause. The mutation is to delete it and watch exactly o
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
-import re, subprocess, sys
+import ast, shutil, subprocess
 from pathlib import Path
 
 path = Path("src/flagquantum_mcp_server/training.py")
@@ -2937,27 +2949,66 @@ mutations = [
      "test_a_learning_rate_adam_cannot_use_is_refused"),
     ("name guard", "    _check_names(names)\n",
      "test_a_circuit_with_no_parameters_is_refused_by_name"),
-    ("observables guard", "    reject_circuit_observables(\n        ir,\n",
+    # The WHOLE call, not a prefix of it. An earlier draft deleted only its first
+    # two lines, which leaves `remedy=(...)` and `)` dangling: an
+    # IndentationError, a collection error, a non-zero exit, and this script
+    # printing CAUGHT for a test that never ran. Measured.
+    ("observables guard",
+     "    reject_circuit_observables(\n        ir,\n        remedy=(\n"
+     "            \"Pass the Hamiltonian as this tool's 'hamiltonian' argument \"\n"
+     "            \"instead, which is where the objective belongs.\"\n"
+     "        ),\n    )\n",
      "test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian"),
 ]
+
+import shutil
 
 for label, target, test in mutations:
     if target not in original:
         print(f"{label}: TARGET NOT FOUND — fix the mutation script")
         continue
-    path.write_text(original.replace(target, "", 1))
+    mutant = original.replace(target, "", 1)
+    assert mutant != original, f"{label}: mutation did not apply"
+    try:
+        ast.parse(mutant)
+    except SyntaxError as exc:
+        print(f"{label}: INVALID MUTANT — {exc}; this would have reported a false CAUGHT")
+        continue
+    path.write_text(mutant)
     result = subprocess.run(
         ["../.venv/bin/pytest", "tests/test_training.py", "-k", test, "-q"],
         capture_output=True, text=True,
     )
-    print(f"{label}: {'CAUGHT' if result.returncode != 0 else 'MISSED'}")
+    # Read WHY it failed. A collection error is a non-zero exit and is not a catch.
+    summary = next(
+        (ln for ln in reversed(result.stdout.splitlines()) if ln.strip()), ""
+    )
+    print(f"{label}: {'CAUGHT' if result.returncode != 0 else 'MISSED'}  | {summary[:90]}")
     path.write_text(original)
+    shutil.rmtree(".pytest_cache", ignore_errors=True)
+    for cache in pathlib.Path(".").rglob("__pycache__"):
+        shutil.rmtree(cache, ignore_errors=True)
 
 assert path.read_text() == original, "restore failed"
 PY
 ```
 
 Expected: every line reads `CAUGHT`. A `MISSED` means that guard is not what the test is checking. A `TARGET NOT FOUND` means the mutation did not apply and the result would have been meaningless — the same failure that hid a broken test in an earlier session.
+
+**Read the summary the script prints beside each verdict, not only the verdict.**
+`CAUGHT` means "pytest exited non-zero", and a module that does not parse also
+exits non-zero. An earlier draft of this step deleted the first two lines of the
+observables call, which leaves the rest of its arguments dangling: the run
+printed `CAUGHT` with the summary `1 error in 0.06s` and the test never
+executed. That is why the loop now parses each mutant before running it and
+prints what the run actually said.
+
+The cache clearing is not decoration either. A restored file whose mtime matches
+the mutant's to the second, at the same byte length, is a cache hit on the
+mutant's bytecode — the source reads correctly while the interpreter runs the
+mutation. Each mutant here differs in length so that particular collision does
+not fire, but the clear costs nothing and the failure it prevents is invisible.
+
 
 - [ ] **Step 6: Run every gate**
 
