@@ -16,6 +16,7 @@ DEFAULT_MAX_GATES = 10_000
 DEFAULT_MAX_IR_BYTES = 262_144
 DEFAULT_MAX_QASM_CHARS = 1_000_000
 DEFAULT_MAX_COMPARE_TOPOLOGIES = 4
+DEFAULT_MAX_RESPONSE_VALUES = 65_536
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -61,3 +62,16 @@ def max_qasm_chars() -> int:
 def max_compare_topologies() -> int:
     """Return how many topologies one comparison call may evaluate."""
     return _positive_int("FLAGQUANTUM_MCP_MAX_COMPARE_TOPOLOGIES", DEFAULT_MAX_COMPARE_TOPOLOGIES)
+
+
+def max_response_values() -> int:
+    """Return how many numbers one tool result may carry back to a client.
+
+    The bounds above limit what this server *accepts*. This one limits what it
+    *returns*, because a result travels to a model's context rather than into
+    memory, and a full probability distribution grows as 2 ** n_wires — 4.2
+    million floats at 22 wires, which is a legal circuit by every other bound
+    here and an unusable answer. The count is of scalar values, so a sparse
+    ``counts`` result over the same circuit is unaffected.
+    """
+    return _positive_int("FLAGQUANTUM_MCP_MAX_RESPONSE_VALUES", DEFAULT_MAX_RESPONSE_VALUES)

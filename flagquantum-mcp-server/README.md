@@ -17,7 +17,8 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Fifteen read-only tools over stdio.
+Sixteen tools over stdio. Fifteen of them only read the circuit they are given;
+the sixteenth runs it locally.
 
 **Build and inspect**
 
@@ -53,6 +54,12 @@ Fifteen read-only tools over stdio.
 | `emit_qcis_tool` | QCIS text |
 | `draw_circuit_tool` | An ASCII diagram of the circuit |
 | `plan_execution_tool` | How would the SDK execute this — which mode, device, how much memory? |
+
+**Run**
+
+| Tool | What it answers |
+| --- | --- |
+| `simulate_circuit_tool` | Counts, samples, marginal probabilities or an expectation value from a local statevector run |
 
 Three resources: `flagquantum://version` (versions of the server, the SDK and
 the IR contract), `flagquantum://gate-set` (every gate with its wire count and
@@ -292,6 +299,12 @@ them without a code change:
 | `FLAGQUANTUM_MCP_MAX_IR_BYTES` | 262144 | Serialized circuit payload |
 | `FLAGQUANTUM_MCP_MAX_QASM_CHARS` | 1000000 | Emitted program size |
 | `FLAGQUANTUM_MCP_MAX_COMPARE_TOPOLOGIES` | 4 | Topologies per comparison |
+| `FLAGQUANTUM_MCP_MAX_RESPONSE_VALUES` | 65536 | Values one result may carry back |
+
+The last one is the only bound on what this server *returns* rather than what it
+accepts. A result travels into a model's context rather than into memory, and a
+sampled result grows with `shots` — 200,000 draws is legal by every other bound
+here and far more than an answer.
 
 ## Errors
 
@@ -319,8 +332,6 @@ failed call leaves the session usable for the next one, which
 
 ## What this server deliberately does not do
 
-- **No execution.** Nothing runs a circuit, locally or remotely. Planning is
-  `plan_execution_tool`; running is the caller's step, through `fq.run`.
 - **No hardware, no credentials, no network.** FlagQuantum's own release 0.2.0
   ships no remote-submission entry point, and this adapter adds none.
 - **No noise models.** A `NoiseModel` is a live SDK object rather than a
@@ -331,6 +342,46 @@ failed call leaves the session usable for the next one, which
   retirement condition, and its `tests/team/services/test_service_boundaries.py`
   fails if `mcp` or `fastmcp` becomes importable on the core path. Keeping the
   gateway out of tree is what that contract asks for.
+
+## What it runs, and what that does not prove
+
+`simulate_circuit_tool` executes circuits in this process: a statevector
+simulation on CPU. That is the whole of it — no remote target, no provider, no
+token. It was not always here. Until it landed the server planned and never ran,
+and the line above used to say so; a real task showed the cost, so the line
+moved rather than the tool being smuggled in underneath it.
+
+The result says where it ran, in the SDK's own fields rather than in a summary:
+
+```json
+"execution": {
+  "execution_path": "local_statevector",
+  "platform_provider": "pytorch_cpu",
+  "mode": "statevector",
+  "device": "cpu",
+  "accuracy": {"metric": "not_measured", "...": "..."}
+}
+```
+
+`accuracy.metric` is `not_measured`, and the plan behind the run reports
+`release_gate_allowed: false`. An ideal simulation of a circuit is a statement
+about that circuit, not about any device that would run it — the SDK declines to
+license a stronger reading, and this server does not add one.
+
+Three things are refused rather than reinterpreted, each because accepting
+would produce a plausible-looking answer:
+
+| Input | Why it is refused |
+| --- | --- |
+| A circuit with unbound parameters | The SDK's refusal is `planned execution failed`, which names nothing. The message here names the parameters and points at `bind_parameters_tool` |
+| A circuit carrying `observables` | The default statevector path never reads the field, so the run would return no expectation value and no error either. Ask for an `expectation` output instead |
+| `outputs` alongside the circuit's own `measurements` | The SDK accepts one or the other, and says so in vocabulary that names neither field |
+
+The width where a full probability distribution stops being returnable is the
+SDK's own contraction limit, and its message points at a setting this server
+does not expose. That refusal keeps the SDK's text and adds what a caller can
+actually do — name a few wires, or ask for `counts`, which report only the
+outcomes that occurred.
 
 ## Which contracts this rests on
 

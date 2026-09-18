@@ -14,6 +14,8 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
+from tests.conftest import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
+
 pytestmark = pytest.mark.integration
 
 GHZ = [
@@ -35,9 +37,9 @@ async def test_the_server_starts_and_lists_its_surface(transport: StdioTransport
         resources = await client.list_resources()
         prompts = await client.list_prompts()
 
-    assert len(tools) == 15
-    assert len(resources) == 3
-    assert len(prompts) == 3
+    assert {tool.name for tool in tools} == set(EXPECTED_TOOLS)
+    assert {str(resource.uri) for resource in resources} == set(EXPECTED_RESOURCES)
+    assert {prompt.name for prompt in prompts} == set(EXPECTED_PROMPTS)
 
 
 async def test_a_tool_call_round_trips_over_the_wire(transport: StdioTransport) -> None:

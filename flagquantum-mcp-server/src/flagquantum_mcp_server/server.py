@@ -43,6 +43,7 @@ from flagquantum_mcp_server.errors import (
 from flagquantum_mcp_server.gates import gate_records
 from flagquantum_mcp_server.parameters import bind_parameters, inspect_parameters
 from flagquantum_mcp_server.planning import plan_execution
+from flagquantum_mcp_server.simulation import simulate_execution
 from flagquantum_mcp_server.structure import describe_layers, describe_topology
 
 INSTRUCTIONS = """\
@@ -57,7 +58,9 @@ A typical session:
 3. Call optimize_circuit_tool, then route_circuit_tool or
    compare_topologies_tool if the circuit must respect a connectivity limit.
 4. Call emit_openqasm_tool or emit_qcis_tool to export the result.
-5. Call plan_execution_tool to see how the SDK would execute it.
+5. Call plan_execution_tool to see how the SDK would execute it, then
+   simulate_circuit_tool to run it locally and get counts, samples,
+   probabilities or an expectation value.
 
 Read the flagquantum://gate-set resource for the available gate names and
 flagquantum://ir-schema for the IR envelope. IR JSON is the canonical format;
@@ -363,8 +366,8 @@ def plan_execution_tool(
     execution contract (mode, backend, device, precision) plus a summary
     carrying depth, state_bytes, shardable_wires and the claim fields
     (claim_evidence_type, scalability_claim_allowed, release_gate_allowed) that
-    say what this plan does and does not license. Running the circuit is the
-    caller's own step, through ``fq.run``.
+    say what this plan does and does not license. To actually run the circuit
+    locally, call simulate_circuit_tool with the same options and outputs.
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
@@ -389,6 +392,61 @@ def plan_execution_tool(
         program is distributed.
     """
     return plan_execution(circuit, circuit_format, options=options, outputs=outputs)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def simulate_circuit_tool(
+    circuit: str,
+    circuit_format: CircuitFormat = "ir",
+    options: Mapping[str, Any] | None = None,
+    outputs: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run a circuit locally and return the outputs it was asked for.
+
+    This is the only tool here that executes anything, and it executes in this
+    process: a statevector simulation on CPU, with no network, no credentials
+    and no provider. The result carries the SDK's own provenance
+    (execution_path "local_statevector", platform_provider "pytorch_cpu") and
+    its accuracy contract, which reports metric "not_measured" — an ideal
+    simulation is not evidence about any hardware, and this tool does not
+    present it as such.
+
+    What is returned, in order of precedence: the outputs you pass; otherwise
+    the circuit's own "measurements" field, which the SDK reads and which
+    carries its own shot count; otherwise probabilities over every wire.
+    Widths that the SDK will not compute a marginal for are refused with the
+    alternatives named.
+
+    Refused rather than guessed at: a circuit with unbound parameters (bind it
+    first), a circuit carrying "observables" (a local statevector run never
+    evaluates them — ask for an "expectation" output instead), and outputs
+    passed alongside the circuit's own measurements.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+        options: Partial execution options. Supported keys: mode, backend,
+            device, target, batch_size, precision, shots, seed,
+            memory_limit_bytes, require_gradients, allow_approximate,
+            allow_backend_fallback. A "shots" value is required by "counts" and
+            "samples" outputs.
+        outputs: Requested outputs; each has a "kind" of "counts",
+            "expectation", "probabilities" or "samples", plus either a "wires"
+            list or, for "expectation", a "pauli" string such as "ZZI".
+
+    Returns:
+        The resolved outputs — each with its kind, wires, shots and value — and
+        the execution provenance the SDK reported, including the accuracy
+        contract that records a local run as not measured.
+    """
+    return simulate_execution(circuit, circuit_format, options=options, outputs=outputs)
 
 
 @mcp.tool(annotations=READ_ONLY)

@@ -138,6 +138,18 @@ def _planned_with_shots(payload: dict[str, Any]) -> None:
     assert payload["summary"]["depth"] == 2
 
 
+def _simulated(payload: dict[str, Any]) -> None:
+    # Both arguments have to land for this to come back at all: a dropped
+    # `options` leaves the counts output without its shot count, and a dropped
+    # `outputs` falls back to probabilities over every wire.
+    (counts,) = payload["outputs"]
+    assert counts["kind"] == "counts", counts
+    assert counts["shots"] == 100, "options.shots must reach the run"
+    assert counts["wires"] == [0], "outputs.wires must reach the run"
+    assert sum(counts["value"][0].values()) == 100
+    assert payload["execution"]["execution_path"] == "local_statevector"
+
+
 def _described_two_gates(payload: dict[str, Any]) -> None:
     assert [record["opcode"] for record in payload["gates"]] == ["rz", "ccx"]
     assert payload["gates"][1]["aliases"] == ["ccnot", "toffoli"]
@@ -240,6 +252,17 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
                 "outputs": [{"kind": "counts", "wires": [0]}],
             },
             _planned_with_shots,
+        )
+    ],
+    "simulate_circuit_tool": [
+        (
+            {
+                "circuit": BELL,
+                "circuit_format": "qir",
+                "options": {"shots": 100, "seed": 7},
+                "outputs": [{"kind": "counts", "wires": [0]}],
+            },
+            _simulated,
         )
     ],
     "describe_gate_set_tool": [({"gates": ["rz", "ccx"]}, _described_two_gates)],

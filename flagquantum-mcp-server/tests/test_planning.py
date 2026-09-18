@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
+from flagquantum_mcp_server.circuits import serialize
 from flagquantum_mcp_server.errors import (
     ToolInputError,
     UnsupportedFormatError,
@@ -132,3 +135,33 @@ def test_non_integer_wire_is_rejected(ghz3_qir: str) -> None:
             options={"shots": 100},
             outputs=[{"kind": "counts", "wires": ["zero"]}],
         )
+
+
+def _with_measurements(shots: int = 64) -> str:
+    """A canonical IR payload that declares its own measurement."""
+    envelope = json.loads(serialize(json.dumps([{"name": "h", "index": [0]}]), "qir")["ir_json"])
+    envelope["measurements"] = [{"kind": "counts", "wires": [0], "shots": shots}]
+    return json.dumps(envelope)
+
+
+def test_outputs_alongside_declared_measurements_are_refused() -> None:
+    """The SDK's refusal names neither field, so this tool has to.
+
+    A circuit may carry its own measurements, and the SDK reads them; it also
+    refuses output requests on top of them, saying only that measurements
+    cannot be supplied when the program already contains measurement requests.
+    A caller is told a conflict exists and not which two things are in it.
+    """
+    with pytest.raises(ToolInputError) as caught:
+        plan_execution(
+            _with_measurements(), "ir", outputs=[{"kind": "probabilities", "wires": [0]}]
+        )
+
+    message = str(caught.value)
+    assert "measurements" in message
+    assert "outputs" in message
+
+
+def test_a_circuit_may_declare_measurements_without_outputs() -> None:
+    """The field is legal on its own; only the combination is refused."""
+    assert plan_execution(_with_measurements(), "ir")["status"] == "success"

@@ -13,38 +13,9 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ValidationError
 
 from flagquantum_mcp_server.server import mcp
+from tests.conftest import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
 
 pytestmark = pytest.mark.unit
-
-EXPECTED_TOOLS = {
-    "analyze_circuit_tool",
-    "serialize_circuit_tool",
-    "deserialize_circuit_tool",
-    "optimize_circuit_tool",
-    "route_circuit_tool",
-    "compare_topologies_tool",
-    "emit_openqasm_tool",
-    "emit_qcis_tool",
-    "plan_execution_tool",
-    "describe_gate_set_tool",
-    "inspect_parameters_tool",
-    "bind_parameters_tool",
-    "describe_layers_tool",
-    "describe_topology_tool",
-    "draw_circuit_tool",
-}
-
-EXPECTED_RESOURCES = {
-    "flagquantum://version",
-    "flagquantum://gate-set",
-    "flagquantum://ir-schema",
-}
-
-EXPECTED_PROMPTS = {
-    "build_and_analyze_circuit",
-    "compile_for_topology",
-    "export_circuit",
-}
 
 
 def test_server_is_named_and_versioned() -> None:
@@ -282,6 +253,8 @@ async def test_the_ir_schema_resource_shows_how_to_write_a_symbol() -> None:
         ("plan_execution_tool", "Nothing is executed"),
         ("bind_parameters_tool", "no longer parameterized"),
         ("emit_openqasm_tool", "measures every wire"),
+        ("simulate_circuit_tool", "not_measured"),
+        ("simulate_circuit_tool", "executes in this"),
     ],
 )
 async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, phrase: str) -> None:

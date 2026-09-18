@@ -65,6 +65,7 @@ def plan_execution(
     """
     ir = resolve_ir(circuit, circuit_format)
     sdk = load_sdk()
+    reject_outputs_with_declared_measurements(outputs, ir)
     resolved_outputs = _build_outputs(outputs, n_wires=int(ir.n_wires))
     _require_shots_for_sampling(outputs, options)
     try:
@@ -90,6 +91,43 @@ def plan_execution(
         "summary": _plain(plan.summary()),
         "plan_json": str(plan.to_json()),
     }
+
+
+def reject_outputs_with_declared_measurements(outputs: Any, ir: Any) -> None:
+    """Refuse an output request that collides with the circuit's own measurements.
+
+    A circuit may declare its measurements in the envelope, and the SDK reads
+    that field. It also refuses to accept output requests on top of it, in
+    vocabulary that names neither ``measurements`` nor ``outputs``
+    ("measurements cannot be supplied when the program already contains
+    measurement requests"), so a caller is told a conflict exists without being
+    told which two things are in conflict.
+
+    Shared by the planning and simulation tools because it is a fact about the
+    payload rather than about either one: both pass their outputs to the same
+    SDK entry point, and both would otherwise relay the same puzzle.
+
+    Args:
+        outputs: The caller's output specifications, if any.
+        ir: The validated ``CircuitIR``.
+
+    Raises:
+        ToolInputError: If both an output request and circuit-declared
+            measurements are present.
+    """
+    if not outputs:
+        return
+    declared = tuple(getattr(ir, "measurements", ()) or ())
+    if not declared:
+        return
+    raise ToolInputError(
+        f"This circuit already declares {len(declared)} measurement(s), and "
+        "outputs were passed as well. The SDK accepts one or the other, not "
+        'both ("measurements cannot be supplied when the program already '
+        'contains measurement requests"). Drop the "measurements" field from '
+        "the circuit envelope, or call without the outputs argument and use "
+        "what the circuit declares."
+    )
 
 
 def _require_shots_for_sampling(

@@ -55,6 +55,17 @@ has configured a Qiskit MCP server already knows how to configure ours.
    Docstring examples must run offline with no credentials — the same rule
    FlagQuantum sets for its own stable entry points.
 
+   **In-process simulation is inside this line, not across it.**
+   `simulate_circuit_tool` runs a statevector simulation on CPU in the same
+   process: no target, no provider, no token, and the SDK reports
+   `execution_path: local_statevector` / `platform_provider: pytorch_cpu` on
+   the result. It is also the one tool that must not be read as evidence about
+   hardware, so its result carries the SDK's `accuracy.metric == "not_measured"`
+   and the run's `release_gate_allowed: false` rather than a summary that drops
+   them. FlagQuantum's ARCH-001 draws the same boundary from the other side:
+   direct in-process resources are *Compute*/*Simulation*, and credentials and
+   submission belong to *Remote*, which this server does not touch.
+
 5. **Tools are read-only over the caller's inputs and side-effect free.** No
    tool may mutate files, environment variables, or global state.
 
