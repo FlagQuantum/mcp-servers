@@ -1068,12 +1068,19 @@ code that needs each name — Task 5 adds nothing, Task 6 adds `load_module` and
 ``fq.Module`` and ``fq.train`` want a Python callable rather than JSON, which
 looks like a dead end for a server whose every input is JSON. It is not: a
 serialized circuit carries every instruction it was built from, and
-``Circuit.gate`` is the single primitive that rebuilds them — built-in gates,
-arbitrary matrices and channels all go through it. So the replay below is a loop
-and not a gate table, and it carries no numerical logic. It translates a
-serialized circuit into the callable shape the SDK asks for, and nothing else.
+``Circuit.gate`` is the single primitive that rebuilds them — built-in gates and
+arbitrary matrices both go through it. So the replay below is a loop and not a
+gate table, and it carries no numerical logic. It translates a serialized circuit
+into the callable shape the SDK asks for, and nothing else.
 
-Three facts about the SDK shape this module, all measured rather than read:
+A channel is the one instruction it does not rebuild faithfully. Flagging an
+instruction as a channel is ``instruction.metadata["is_channel"]``, and
+``Circuit.gate`` takes no ``metadata``, so the flag cannot be carried. Measured,
+the consequence is smaller than it sounds: a channel circuit fails ``fq.run`` on
+this path both before and after the replay, so no number a caller sees changes —
+but the replay is not faithful there and this docstring will not claim it is.
+
+Four facts about the SDK shape this module, all measured rather than read:
 
 * ``Module(hamiltonian=H)`` stores ``H`` and does not evaluate it. Which
   observable a module measures comes from its ``RuntimePolicy``, whose default is
@@ -1084,9 +1091,15 @@ Three facts about the SDK shape this module, all measured rather than read:
   Python API it is stored as an opaque dict and the circuit reports itself as
   unparameterized, which is the silent failure ``circuits.py`` already refuses at
   the JSON boundary. Names are therefore read through ``circuit_from_ir``, which
-  decodes the markers properly.
+  decodes the markers properly. The same trap covers the instruction list itself:
+  see ``replay_builder``, which reads the IR's live objects and never
+  ``to_dict()``.
 * ``Circuit.gate`` takes its arguments as a ``params=`` mapping, not
   positionally, and the argument names are the SDK's own gate manifest.
+* A parameter can also sit inside a ``ParameterExpression`` — ``2.0 * t0``.
+  ``parameter_names`` reports the name either way, so a replay that substitutes
+  only a top-level ``Parameter`` advertises a trainable group it never applies,
+  and stays byte-equal to its source while doing it.
 
 Training is the only operation here whose cost is not bounded by the size of its
 input, so a prediction decides before any work starts. See ``predict_seconds``.
@@ -1203,51 +1216,132 @@ def _argument(value: Any, parameters: Mapping[str, Any], sdk: Any) -> Any:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 8 tests.
+Expected: PASS, 11 tests in this file. (The task's block grew from 8 to 11
+during its review — see the execution and expression tests below — so a count
+taken from an earlier draft of this plan will be three short.)
 
 - [ ] **Step 5: Mutation-test each new claim**
 
-Run each mutation, watch it go red, restore. The `assert after != before` line is not decoration: an earlier session shipped a mutation whose replacement target spanned two string literals, so nothing changed and the suite stayed green for a reason that had nothing to do with the test.
+Run each mutation, watch it go red, restore from the sidecar. The
+`assert after != before` line is not decoration: a mutation whose search text
+does not match changes nothing, and that is indistinguishable from a test that
+did not notice.
+
+**Mutation 1 — put the encoded read back.** This is the one that justifies the
+whole design, and its result is the argument: it must turn the *execution* test
+red while the byte-equality assertion stays green under it.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
+
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
 Path(str(p) + ".mutbak").write_text(before)
-after = before.replace(
-    "                params=arguments or None,\n                matrix=instruction.get(\"matrix\"),\n",
-    "                params=arguments or None,\n",
+after = (
+    before.replace(
+        "    instructions = tuple(ir.instructions)",
+        '    instructions = tuple(ir.to_dict()["instructions"])',
+    )
+    .replace(
+        "                str(instruction.name),",
+        '                str(instruction["opcode"]),',
+    )
+    .replace(
+        "                [int(wire) for wire in instruction.wires],",
+        '                [int(wire) for wire in instruction["wires"]],',
+    )
+    .replace(
+        "                matrix=instruction.matrix,",
+        '                matrix=instruction.get("matrix"),',
+    )
+    .replace(
+        "                for key, value in instruction.params.items()",
+        '                for key, value in (instruction.get("params") or {}).items()',
+    )
+    .replace(
+        "                str(key): _argument(value, parameters, sdk)",
+        "                str(key): value",
+    )
 )
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
 ```
 
-Expected: FAIL on `test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit` and `test_a_matrix_gate_survives_the_replay`.
+Expected, and measured: **5 failed, 5 passed**.
+`test_a_replayed_circuit_executes_and_agrees_with_its_source` is the first red,
+with `ExecutionError: planned execution failed` — and
+`test_a_replay_of_a_numeric_circuit_reproduces_its_instructions` stays **green**
+under it. That contrast is the finding the review produced: byte-equality was
+satisfied by a circuit that cannot run, which is why the execution test exists.
+
+Restore, then the second mutation:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+```
+
+**Mutation 2 — drop the expression branch.**
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
+
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
 Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
-    "        return parameters[symbol][0]",
-    "        return next(iter(parameters.values()))[0]",
+    "    if isinstance(value, sdk.ParameterExpression):\n"
+    "        return value.bind({name: group[0] for name, group in parameters.items()})\n",
+    "",
 )
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-python3 -c "import pathlib; pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('flagquantum-mcp-server/src/flagquantum_mcp_server/training.py'))"
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 ```
 
-Expected: FAIL on `test_the_replay_binds_each_symbol_by_name_not_by_position`. That test uses two parameters and binds them in reverse order precisely so that a positional replay cannot pass.
+Expected: FAIL on `test_a_parameter_inside_an_expression_is_substituted` and
+`test_a_gradient_flows_through_an_expression_to_the_name_inside_it` — measured
+as 1 failed, 9 passed before the gradient test was added, 2 failed after. A name
+appearing only inside an expression stops being substituted, and
+`parameter_names` never reports it: the tool would advertise a trainable group it
+never applies.
+
+**Mutation 3 — bind the expression eagerly instead of through the SDK.**
+
+```bash
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("src/flagquantum_mcp_server/training.py")
+before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
+after = before.replace(
+    "        return value.bind({name: group[0] for name, group in parameters.items()})",
+    "        return value.bind({name: float(group) for name, group in parameters.items()})",
+)
+assert after != before, "mutation did not apply"
+p.write_text(after)
+PY
+../.venv/bin/pytest tests/test_training.py -q
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+```
+
+Expected, and measured: **1 failed, 10 passed** — only the gradient test, while
+`test_a_parameter_inside_an_expression_is_substituted` stays green in isolation.
+That is what proves the gradient test is not redundant with it. Note *how* it
+goes red: `make_fx` refuses the builder at trace time ("Module builder
+compilation requires static circuit topology"), not on the gradient comparison.
+The failure is loud, so the test's own docstring says so rather than claiming a
+silent one — see the paragraph it carries.
 
 - [ ] **Step 6: Commit**
 
@@ -1438,7 +1532,7 @@ def predict_seconds(ir: Any, steps: int) -> float:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 13 tests.
+Expected: PASS, 15 tests in this file (11 from Task 4, 4 here).
 
 - [ ] **Step 5: Mutation-test the model's direction**
 
