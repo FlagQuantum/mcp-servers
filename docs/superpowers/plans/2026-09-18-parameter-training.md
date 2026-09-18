@@ -17,6 +17,14 @@
   is written for that directory. The mutation and verification blocks below open
   with `cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"` rather
   than `cd flagquantum-mcp-server`, so they work from either.
+- **Regenerate the brief before writing any dispatch that names one.** The brief
+  files under `.superpowers/sdd/<plan>/` are extracts, not sources: they are
+  produced by `scripts/task-brief PLAN_FILE N` and they go stale the moment the
+  plan is edited. A dispatch that says "the amended brief" while pointing at an
+  extract taken before the amendment hands over exactly the text the amendment
+  removed — and the implementer, seeing plan and brief disagree, has to guess
+  which is authoritative. Round 3 of Task 7 lost time to this twice.
+  Run the extractor immediately before composing the dispatch, every time.
 - **Mutations are reverted by moving a sidecar back, never by `git checkout`.**
   Each mutation script writes `Path(str(p) + ".mutbak").write_text(before)`
   before it breaks anything, and the restore replaces the file from that
@@ -2142,6 +2150,35 @@ found that a non-finite learning rate or starting value returned a `success`
 envelope full of NaN — so they shipped with the validators they pin rather than a
 task later, which is where a test belongs. Two `def`s with one name in a module
 means pytest collects one and silently never runs the other.
+
+Both shipped tests are recorded here, because the plan assigned them to no task
+and a test that exists only in the file is one the next reader cannot check:
+
+```python
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), 10**400])
+def test_a_non_finite_starting_value_is_refused(bad: float) -> None:
+    """A starting value that is not a finite real reaches the optimizer otherwise.
+
+    Measured: without this refusal, ``values={"t0": nan}`` returns
+    ``status: "success"`` with every loss and every returned parameter NaN, and
+    ``values={"t0": 10**400}`` returns an internal error. ``json.loads`` accepts
+    the ``NaN`` and ``Infinity`` tokens and turns an integer literal into a
+    Python ``int``, so no payload carrying one is stopped on the way in.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": bad, "t1": 0.1})
+
+    assert "t0" in str(caught.value)
+```
+
+All three cases are here on purpose and none is redundant. ``nan`` and ``inf``
+exercise the ``isfinite`` test; ``10**400`` exercises the ``OverflowError`` it
+*raises*, because a value can be finite and still be too large to be a float —
+only that case reaches the helper's ``except`` branch. A helper whose handler
+never fires is decoration. The learning-rate test's list carries the same three
+for the same reason.
 
 That test's rate list has since grown a case the guard did not originally cover.
 `json.loads` yields a Python `int` for a JSON integer literal, and one larger than
