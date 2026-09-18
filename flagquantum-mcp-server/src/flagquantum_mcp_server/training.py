@@ -143,9 +143,10 @@ def predict_seconds(ir: Any, steps: int) -> float:
 
     Where that leaves the margin, over every width it was calibrated at: 11x at
     four qubits and 4.9x at eight, where the floor is doing all the work; 2.0x
-    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest and
-    the one that matters least, since a single step there is 68 s and the budget
-    refuses every run above two steps anyway.
+    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest margin
+    and the one that matters least, because the budget refuses every run there —
+    one step is 119.6 s predicted against a 60 s bound. Twenty-two qubits is the
+    widest width that admits a run at all: one step 27.8 s, two 55.0 s.
 
     Args:
         ir: A validated ``CircuitIR``.
