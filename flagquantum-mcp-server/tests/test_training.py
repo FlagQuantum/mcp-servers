@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from flagquantum_mcp_server.errors import ToolInputError
 from flagquantum_mcp_server.training import parameter_names, replay_builder
 
 pytestmark = pytest.mark.unit
@@ -437,3 +438,61 @@ def _ansatz_tail_qir(n_wires: int, instructions: int) -> list[dict[str, object]]
     per_layer = 3 * n_wires - 1
     layers = -(-instructions // per_layer)
     return _layered_qir(n_wires, layers)[-instructions:]
+
+
+# --- the objective ---
+
+
+def test_a_hamiltonian_is_built_from_the_same_terms_shape_the_outputs_use() -> None:
+    from flagquantum_mcp_server.training import hamiltonian_from_terms
+
+    built = hamiltonian_from_terms(
+        [{"pauli": "ZZ", "coefficient": 1.0}, {"pauli": "XI", "coefficient": -0.5}],
+        n_wires=2,
+    )
+
+    assert len(built.terms) == 2
+    assert [float(term.coefficient) for term in built.terms] == [1.0, -0.5]
+
+
+def test_a_term_that_the_expectation_builder_refuses_is_refused_here_too() -> None:
+    """One shape, one validator, one set of refusals — that is the point of sharing."""
+    from flagquantum_mcp_server.training import hamiltonian_from_terms
+
+    with pytest.raises(ToolInputError) as caught:
+        hamiltonian_from_terms([{"pauli": "ZZ"}, {"pauli": "II"}], n_wires=2)
+
+    assert "terms[1]" in str(caught.value)
+    assert "identity" in str(caught.value)
+
+
+def test_a_term_that_does_not_match_the_circuit_width_is_refused_here_too() -> None:
+    from flagquantum_mcp_server.training import hamiltonian_from_terms
+
+    with pytest.raises(ToolInputError) as caught:
+        hamiltonian_from_terms([{"pauli": "ZZZ"}], n_wires=2)
+
+    assert "covers 3 wires" in str(caught.value)
+
+
+def test_a_hamiltonian_with_a_single_identity_free_term_is_accepted() -> None:
+    """The smallest legal objective, so the refusal above is not refusing everything."""
+    from flagquantum_mcp_server.training import hamiltonian_from_terms
+
+    assert len(hamiltonian_from_terms([{"pauli": "XI"}], n_wires=2).terms) == 1
+
+
+def test_a_pauli_letter_lands_on_the_wire_its_position_names() -> None:
+    """What "IX" versus "XI" actually decides, which the identity filter does not.
+
+    The ``if letter != "I"`` is not what keeps the numbering right — the SDK's
+    own normalizer drops identities from ``ops`` either way, measured — so a test
+    of the filter would pass for the wrong reason. The position of the letter is
+    what the caller reads as the wire, and getting it backwards is silent: every
+    energy stays plausible, and reversing the enumeration leaves every other
+    assertion in this module green.
+    """
+    from flagquantum_mcp_server.training import hamiltonian_from_terms
+
+    assert hamiltonian_from_terms([{"pauli": "IX"}], n_wires=2).terms[0].ops == ((1, "x"),)
+    assert hamiltonian_from_terms([{"pauli": "XI"}], n_wires=2).terms[0].ops == ((0, "x"),)

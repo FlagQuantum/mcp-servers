@@ -79,6 +79,32 @@ def _load() -> ModuleType:
         raise FlagQuantumUnavailableError(SDK_NOT_INSTALLED) from exc
 
 
+def load_module(module_path: str) -> ModuleType:
+    """Import and return a submodule of the SDK by path.
+
+    A companion to :func:`load_attribute` for the case where several names come
+    from one module: importing it once and reading the attributes is clearer than
+    three calls that each re-import it.
+
+    Args:
+        module_path: Dotted path of the module to import.
+
+    Returns:
+        The imported module.
+
+    Raises:
+        FlagQuantumUnavailableError: If the module is not importable.
+    """
+    try:
+        return importlib.import_module(module_path)
+    except ImportError as exc:
+        raise FlagQuantumUnavailableError(
+            f"{module_path} is not importable in the installed flagquantum. "
+            "This server requires the module that provides the training "
+            "objective."
+        ) from exc
+
+
 def load_attribute(module_path: str, attribute: str) -> Any:
     """Resolve one attribute, reporting a clear error when a contract moved.
 

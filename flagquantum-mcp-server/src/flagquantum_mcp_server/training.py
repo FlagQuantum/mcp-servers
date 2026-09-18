@@ -45,8 +45,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
-from flagquantum_mcp_server._bridge import load_sdk
+from flagquantum_mcp_server._bridge import load_module, load_sdk
 from flagquantum_mcp_server.circuits import circuit_from_ir
+from flagquantum_mcp_server.planning import validate_pauli_terms
 
 
 def parameter_names(ir: Any) -> tuple[str, ...]:
@@ -110,6 +111,62 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
         return circuit
 
     return build
+
+
+def hamiltonian_from_terms(terms: Any, *, n_wires: int) -> Any:
+    """Build the SDK's ``Hamiltonian`` from a ``terms`` list.
+
+    The same JSON shape ``outputs`` accepts, validated by the same function, so
+    that "a weighted sum of Pauli strings" has one spelling and one set of
+    refusals across the server. What differs is only what is built: an
+    ``Observable`` for a measurement, a ``Hamiltonian`` for an objective.
+
+    Reached through ``flagquantum.algorithms``, which declares both names in its
+    ``__all__`` and is not in any capability's ``public_apis``. That is a tier-3
+    dependency: admitted because there is no other way to say what to minimise,
+    and pinned by ``tests/test_api_contract.py``.
+
+    Args:
+        terms: A non-empty list of ``{"pauli": ..., "coefficient": ...}``
+            mappings, one letter per wire.
+        n_wires: Circuit width every term's Pauli string must match.
+
+    Returns:
+        A ``flagquantum.algorithms.Hamiltonian``.
+
+    Raises:
+        ToolInputError: If the list, a term, a Pauli string, or a coefficient is
+            unusable.
+        ToolLimitError: If the list carries more terms than the bound allows.
+    """
+    algorithms = load_algorithms()
+    return algorithms.Hamiltonian(
+        [
+            algorithms.pauli_term(
+                coefficient,
+                {wire: letter for wire, letter in enumerate(pauli) if letter != "I"},
+            )
+            for pauli, coefficient in validate_pauli_terms(terms, n_wires=n_wires)
+        ]
+    )
+
+
+def load_algorithms() -> Any:
+    """Return ``flagquantum.algorithms``, where the objective's types live.
+
+    A module rather than one attribute, because two names come from it:
+    ``Hamiltonian`` and ``pauli_term``. Importing it once and reading both
+    through it is clearer than two ``load_attribute`` calls that each re-import
+    the same module, and it makes the dependency's shape visible at the call
+    site.
+
+    Returns:
+        The ``flagquantum.algorithms`` module.
+
+    Raises:
+        FlagQuantumUnavailableError: If the module is not importable.
+    """
+    return load_module("flagquantum.algorithms")
 
 
 # The budget model's constants. Calibrated from warm per-step measurements at 4,
