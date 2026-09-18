@@ -341,6 +341,28 @@ def train_parameters(
     }
 
 
+def _is_finite_number(value: int | float) -> bool:
+    """Is this a finite real, without raising on one too large to be a float?
+
+    ``math.isfinite`` raises ``OverflowError`` on an ``int`` bigger than a float
+    can hold, which a JSON integer literal can be — ``json.loads("1" + "0"*400)``
+    is a perfectly ordinary Python int. Measured: without this, such a value
+    escapes the guard as an ``OverflowError`` and reaches the client as an
+    internal error instead of a refusal naming the argument. Pinned by the
+    ``10**400`` case in `test_a_learning_rate_adam_cannot_use_is_refused`.
+
+    Args:
+        value: A number already known to be an ``int`` or a ``float``.
+
+    Returns:
+        True if it is finite.
+    """
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
 def _check_steps(steps: Any) -> None:
     """Reject a step count the loop cannot use.
 
@@ -372,7 +394,9 @@ def _check_learning_rate(learning_rate: Any) -> None:
     if (
         isinstance(learning_rate, bool)
         or not isinstance(learning_rate, (int, float))
-        or not math.isfinite(learning_rate)
+        # A JSON integer can be larger than a float holds, and math.isfinite
+        # raises OverflowError on one rather than returning False.
+        or not _is_finite_number(learning_rate)
         or learning_rate <= 0
     ):
         raise ToolInputError(
@@ -477,7 +501,7 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
         if (
             isinstance(value, bool)
             or not isinstance(value, (int, float))
-            or not math.isfinite(value)
+            or not _is_finite_number(value)
         ):
             raise ToolInputError(
                 f"values[{name!r}] is {value!r}; every starting value must be a finite real number."

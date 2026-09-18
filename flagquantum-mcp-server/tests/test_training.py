@@ -695,7 +695,10 @@ def test_a_non_finite_starting_value_is_refused() -> None:
     assert "t0" in str(caught.value)
 
 
-@pytest.mark.parametrize("rate", [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "rate",
+    [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf"), 10**400],
+)
 def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
     from flagquantum_mcp_server.training import train_parameters
 
