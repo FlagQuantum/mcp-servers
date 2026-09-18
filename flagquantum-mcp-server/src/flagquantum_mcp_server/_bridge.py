@@ -38,6 +38,39 @@ def load_sdk() -> ModuleType:
     return _load()
 
 
+TORCH_NOT_INSTALLED = (
+    "torch is not importable in this environment. It is not a declared "
+    "dependency of this server, but the FlagQuantum SDK requires it, so this "
+    "means the SDK is installed without its own dependency."
+)
+
+
+def load_torch() -> ModuleType:
+    """Import and return ``torch``, which the SDK's training API takes.
+
+    Not a declared dependency of this package: the server declares FlagQuantum
+    and FastMCP, and FlagQuantum declares torch. Reaching it through the same
+    lazy path as the SDK keeps that true — a direct import here would make torch
+    a third dependency the packaging does not state, and would make importing
+    this server expensive.
+
+    Returns:
+        The imported ``torch`` module.
+
+    Raises:
+        FlagQuantumUnavailableError: If torch is not importable.
+    """
+    return _load_torch()
+
+
+@lru_cache(maxsize=1)
+def _load_torch() -> ModuleType:
+    try:
+        return importlib.import_module("torch")
+    except ImportError as exc:  # pragma: no cover - depends on environment
+        raise FlagQuantumUnavailableError(TORCH_NOT_INSTALLED) from exc
+
+
 @lru_cache(maxsize=1)
 def _load() -> ModuleType:
     try:

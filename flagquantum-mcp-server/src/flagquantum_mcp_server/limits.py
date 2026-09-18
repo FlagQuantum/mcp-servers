@@ -18,6 +18,7 @@ DEFAULT_MAX_QASM_CHARS = 1_000_000
 DEFAULT_MAX_COMPARE_TOPOLOGIES = 4
 DEFAULT_MAX_RESPONSE_VALUES = 65_536
 DEFAULT_MAX_HAMILTONIAN_TERMS = 1024
+DEFAULT_MAX_TRAIN_SECONDS = 60
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -88,3 +89,19 @@ def max_hamiltonian_terms() -> int:
     the response stops being something a model can read.
     """
     return _positive_int("FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS", DEFAULT_MAX_HAMILTONIAN_TERMS)
+
+
+def max_train_seconds() -> int:
+    """Return how long one training call may be predicted to take.
+
+    Every other bound here limits what a single call may *consume* — memory,
+    width, response size. This one limits time, because training is the only
+    operation in this server whose cost is unbounded by the size of its input:
+    the same four-qubit circuit costs 0.2 s for ten steps and three minutes for
+    ten thousand, and ``steps`` is the caller's number.
+
+    The prediction that reads this bound is an estimate rather than a
+    measurement of the caller's machine, so the bound is a policy about how long
+    an agent should be made to wait, not a guarantee about the clock.
+    """
+    return _positive_int("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", DEFAULT_MAX_TRAIN_SECONDS)

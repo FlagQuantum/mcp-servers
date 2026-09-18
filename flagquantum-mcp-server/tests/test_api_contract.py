@@ -193,3 +193,35 @@ def test_the_installed_sdk_has_no_mcp_dependency() -> None:
 
     assert "mcp" not in declared.replace("flagquantum", "")
     assert "fastmcp" not in declared
+
+
+def test_the_training_budget_is_read_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flagquantum_mcp_server import limits
+
+    assert limits.max_train_seconds() == 60
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "5")
+
+    assert limits.max_train_seconds() == 5
+
+
+def test_a_malformed_training_budget_falls_back_rather_than_disabling_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bound that reads as zero would refuse every call, which is a different bug."""
+    from flagquantum_mcp_server import limits
+
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "0")
+
+    assert limits.max_train_seconds() == 60
+
+
+def test_torch_is_reached_lazily_and_is_not_a_declared_dependency() -> None:
+    """The optimizer type is torch's, but torch is not this package's to declare."""
+    from importlib.metadata import requires
+
+    from flagquantum_mcp_server._bridge import load_torch
+
+    assert load_torch().optim.Adam is not None
+    declared = " ".join(requires("flagquantum-mcp-server") or ()).lower()
+
+    assert "torch" not in declared
