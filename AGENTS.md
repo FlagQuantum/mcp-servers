@@ -108,10 +108,10 @@ Before claiming work is complete, run everything:
 
 ```bash
 cd flagquantum-mcp-server
-../../.venv/bin/ruff check .
-../../.venv/bin/ruff format --check .
-../../.venv/bin/mypy --config-file ../mypy.ini src
-../../.venv/bin/pytest -m "not integration"
+../.venv/bin/ruff check .
+../.venv/bin/ruff format --check .
+../.venv/bin/mypy --config-file ../mypy.ini src
+../.venv/bin/pytest -m "not integration"
 ```
 
 Run **these commands**, not equivalents. `pytest` as a console script inserts
@@ -121,6 +121,34 @@ collection error into a green run. That difference put two red commits on `main`
 and reached a release bump before anyone saw it: 512 tests passed locally under
 the invocation CI does not use. If a check has two spellings, the one written
 here is the one that counts.
+
+**These four are not the whole of CI.** `.github/workflows/ci.yml` runs nine
+steps across three jobs, and the ones the list above does not cover are exactly
+the ones that broke next:
+
+```bash
+cd flagquantum-mcp-server
+../.venv/bin/pytest -m integration
+../.venv/bin/python examples/stdio_client.py          # the documented example
+
+# The package job, rehearsed rather than approximated: a clean environment with
+# the wheel and no development dependencies, which is the only one that proves
+# the built artifact works.
+../.venv/bin/python -m build
+python3 -m venv /tmp/wheelcheck
+/tmp/wheelcheck/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+/tmp/wheelcheck/bin/python -m pip install dist/*.whl
+/tmp/wheelcheck/bin/python -c "import pytest"            # must FAIL: see below
+```
+
+**Every job in CI must be reproducible here, and the environment is part of the
+job.** The wheel smoke test failed on a release commit with `No module named
+'pytest'` because the declaration it read lived in `conftest.py`: a check on the
+artifact, broken by a dependency of the check. A verification step that only
+passes in the environment you happen to have is not verifying the thing CI
+verifies. When you add a step to the workflow, run it here the same way — and
+when a step needs an environment, build that environment rather than borrowing
+the one that is already warm.
 
 Report the actual output. A scaffold that has never been executed is not
 finished, and this repository's README must not describe a capability that no
