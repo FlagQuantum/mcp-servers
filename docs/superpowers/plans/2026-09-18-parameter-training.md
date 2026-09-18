@@ -2653,7 +2653,14 @@ def test_an_empty_hamiltonian_is_refused() -> None:
     with pytest.raises(ToolInputError) as caught:
         train_parameters(ANGLED, [], "qir")
 
-    assert "empty" in str(caught.value)
+    message = str(caught.value)
+    assert "empty" in message
+    # Both words, because "empty" alone is already true of the shared
+    # validator's message before this task renames anything: it reads
+    # "'terms' is empty". Asserting only that would pass before this task
+    # does its one job, and would keep passing if it never did.
+    assert "hamiltonian" in message
+    assert "'terms'" not in message
 
 
 def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
@@ -2725,7 +2732,31 @@ def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `../.venv/bin/pytest tests/test_training.py -k "refused or no_parameters" -q`
-Expected: some FAIL. Which ones fail depends on what Task 7 left implicit — the missing-`hamiltonian` and empty-`hamiltonian` cases in particular currently reach `validate_pauli_terms` and produce a message about `'terms'` rather than about `hamiltonian`. Note the actual messages before changing anything; a refusal that names the wrong field is the failure this task is for.
+Expected: **four** of the nine fail, and it is worth knowing which four and why,
+because the rest already pass and that is not a mistake in your run.
+
+Failing, and each for a different reason:
+
+- `test_a_missing_hamiltonian_is_refused` — reaches `validate_pauli_terms(None)`
+  and gets a message about `'terms'`, which never says `hamiltonian`.
+- `test_an_empty_hamiltonian_is_refused` — same, and this is the one to read
+  carefully: the shared validator's message is `'terms' is empty`, so a test
+  asserting only the word `empty` passes **before this task changes anything**.
+  That is why it asserts `hamiltonian` is present and `'terms'` is absent.
+- `test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian` —
+  nothing on this path reads the `observables` field yet.
+- `test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused` or
+  `test_a_missing_value_is_refused`'s message wording may differ from the assert;
+  read what you get.
+
+Passing already, because Task 7 ships these refusals in the same code path that
+must perform them: the no-parameters case, the step count, the learning rate, and
+the budget. **That is not a gap to close** — do not delete or move them to make
+this task's tests fail. Step 2 is a check on your reading, not a checklist you
+are required to turn red. Say in your report which were already green.
+
+A refusal that names the wrong field is the failure this task is for; a refusal
+that already names the right one is finished work.
 
 - [ ] **Step 3: Name the `hamiltonian` argument in its own refusals**
 
