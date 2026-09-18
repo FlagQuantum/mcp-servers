@@ -69,6 +69,16 @@ example from a real serialization).
 Three prompts: `build_and_analyze_circuit`, `compile_for_topology`,
 `export_circuit`.
 
+These are recipes for the clients that present them to a person — Claude
+Desktop, the MCP Inspector, a host that turns them into slash commands. An
+autonomous agent may receive none of them: several recorded sessions could not
+enumerate them at all, and reported that they could not tell whether prompts
+existed. So nothing an agent has to know lives only here. Every constraint the
+prompts state is also in a tool summary, or in the server instructions, or in a
+resource — the QCIS refusal and the "say what you assumed" rule were the two
+exceptions, and they are in `emit_qcis_tool` and `bind_parameters_tool` now.
+`PROMPT_CONSTRAINTS` in `tests/test_server_contract.py` keeps that true.
+
 ## Install
 
 ```bash

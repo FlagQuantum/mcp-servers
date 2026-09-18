@@ -333,7 +333,10 @@ def emit_qcis_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[s
     """Render a circuit as QCIS text.
 
     A circuit containing an arbitrary matrix gate comes back as an error rather
-    than as text, because QCIS has no way to express one.
+    than as text, because QCIS has no way to express one. Report that refusal
+    rather than silently substituting a different gate: a circuit that exports
+    successfully because a gate was swapped is not the circuit the caller wrote,
+    and nothing in the text would say so.
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
@@ -517,6 +520,11 @@ def bind_parameters_tool(
     only step that needed this: analysis, optimization, routing, drawing and
     plan_execution_tool all accept a parameterized circuit as-is, because none
     of them reads a parameter value.
+
+    The values are yours to choose, and a chosen value is not a result: say
+    which gates carry parameters and what values you assumed, whenever a number
+    downstream depends on them. inspect_parameters_tool reports which gates
+    carry a parameter and what it is named, so nothing has to be inferred.
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as

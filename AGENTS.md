@@ -101,6 +101,18 @@ has configured a Qiskit MCP server already knows how to configure ours.
   the package name, not by relative paths across directories.
 - Lint and type configuration is shared at the repository root and extended
   per package. Do not fork the rule set inside a package.
+- **A prompt is a recipe, not a channel.** Prompts are for the clients that
+  present them to a person — Claude Desktop, the MCP Inspector, a slash
+  command. An autonomous agent may receive none of them: four recorded sessions
+  each hunted for a prompt, tried directory listing, and could not tell whether
+  prompts existed at all. So a constraint an agent must obey cannot live only
+  in a prompt. Each of the seven rules across this server's three prompts was
+  checked against the channels an agent does read — the server instructions,
+  the tool descriptions, the resources — and the two reachable nowhere else
+  now also appear in the summary of the tool that acts on them.
+  `PROMPT_CONSTRAINTS` in `tests/test_server_contract.py` holds that mapping,
+  and a new prompt rule fails the build until it is either placed where an
+  agent will read it or recorded there with a tool that carries it.
 
 ## Verification
 

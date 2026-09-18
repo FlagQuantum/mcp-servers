@@ -299,6 +299,75 @@ async def test_the_documented_symbol_actually_parameterizes_a_circuit() -> None:
     assert inspect_parameters(example, "ir")["parameter_names"] == ["theta"]
 
 
+# --- a prompt is a recipe, not a place to hide a constraint ---
+#
+# A prompt is delivered to whichever client renders it, and a client that hands
+# one to a person as a slash command does not necessarily hand it to an agent.
+# An autonomous session has no way to enumerate prompts at all: the four
+# recorded sessions each hunted for one, tried directory listing, and reported
+# that they could not tell whether prompts existed. Seven of the instructions
+# across the three prompts were reachable anyway — through the server
+# instructions or a tool description — and one of those was demonstrably used
+# from the tool description rather than from the prompt.
+#
+# Two were not reachable anywhere, and both were prohibitions: report the QCIS
+# refusal rather than substituting a gate, and say which parameter values were
+# assumed. That is the shape this guards. A constraint that only one channel
+# carries is a constraint that silently stops being delivered when that channel
+# is not one the reader has.
+#
+# Each case asserts both directions on purpose. The prompt must still say it —
+# this is not licence to delete the prompt — and a tool an agent will have in
+# front of it must say it too.
+
+PROMPT_CONSTRAINTS: list[tuple[str, str, str]] = [
+    (
+        "export_circuit",
+        "rather than silently substituting",
+        "emit_qcis_tool",
+    ),
+    (
+        "build_and_analyze_circuit",
+        "what values you assumed",
+        "bind_parameters_tool",
+    ),
+]
+
+
+@pytest.mark.parametrize(("prompt", "phrase", "tool"), PROMPT_CONSTRAINTS)
+async def test_a_prompt_constraint_is_readable_without_the_prompt(
+    prompt: str, phrase: str, tool: str
+) -> None:
+    rendered = await _render_any_prompt(prompt)
+
+    assert phrase in rendered, f"{prompt} no longer states its own constraint"
+    description = (await mcp.get_tool(tool)).description or ""
+    assert phrase in description, (
+        f"{tool} does not publish {phrase!r}, so an agent that never receives "
+        f"{prompt} is never told"
+    )
+
+
+async def _render_any_prompt(name: str) -> str:
+    """Render a prompt, supplying whatever arguments it declares."""
+    arguments = {
+        argument.name: "x"
+        for argument in ((await mcp.get_prompt(name)).arguments or [])
+        if argument.required
+    }
+    return str(await mcp.render_prompt(name, arguments))
+
+
+async def test_every_prompt_constraint_names_a_tool_that_publishes_it() -> None:
+    """Guards the table itself: a case whose tool does not exist proves nothing."""
+    tools = {tool.name for tool in await mcp.list_tools()}
+    prompts = {prompt.name for prompt in await mcp.list_prompts()}
+
+    for prompt, _, tool in PROMPT_CONSTRAINTS:
+        assert prompt in prompts, prompt
+        assert tool in tools, tool
+
+
 async def test_prompts_render_with_their_arguments() -> None:
     rendered = await mcp.render_prompt(
         "build_and_analyze_circuit", {"circuit_description": "a Bell state"}
@@ -311,6 +380,23 @@ async def test_export_prompt_mentions_the_qcis_limitation() -> None:
     rendered = await mcp.render_prompt("export_circuit", {"circuit": "[]", "target_format": "qcis"})
 
     assert "matrix gate" in str(rendered)
+
+
+async def test_a_prompt_is_not_the_only_carrier_of_a_constraint() -> None:
+    """The other half of the guard above, stated where it cannot be missed.
+
+    Each prompt rule was checked against the channels an autonomous session
+    actually reads — the server instructions, the tool descriptions and the
+    resources. Five of the seven were reachable without the prompt, and one of
+    those was visibly used from a tool description in a recorded session. The
+    two that were not are the two this file now pins. This test exists so that
+    the next rule added to a prompt fails a build rather than waiting for a
+    session to miss it.
+    """
+    published = " ".join(tool.description or "" for tool in await mcp.list_tools())
+
+    assert "rather than silently substituting" in published
+    assert "what values you assumed" in published
 
 
 async def test_the_ir_schema_resource_says_what_the_hash_covers() -> None:
