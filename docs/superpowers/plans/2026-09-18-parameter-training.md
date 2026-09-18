@@ -3068,6 +3068,24 @@ def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> Non
     anyone who fixes it gets a red test telling them what changed. Measured
     wording; if the rename is ever rebuilt to take the noun as a parameter
     instead of substituting text, this test is what should be deleted.
+
+    **Measured across every position a caller's literal can land, and the split
+    is worth knowing:**
+
+    | caller's value | echoed as | |
+    | --- | --- | --- |
+    | ``pauli="terms["`` | ``'hamiltonian['`` | wrong |
+    | ``coefficient="terms["`` | ``('hamiltonian[')`` | wrong |
+    | a key ``"terms["`` | ``['hamiltonian[']`` | wrong |
+    | ``pauli="terms"`` | ``'terms'`` | correct |
+    | ``coefficient="terms"`` | ``('terms')`` | correct |
+    | a key ``"terms"`` | ``['terms']`` | correct |
+
+    The three ``terms`` cases are correct only because the field-name pattern is
+    anchored to the start of the message. That anchor is a positional accident:
+    a validator that ever reorders a refusal puts the field name back in the
+    middle and silently breaks all three. Worth knowing, not worth fixing here —
+    which is why it is written down.
     """
     from flagquantum_mcp_server.training import train_parameters
 
@@ -3076,7 +3094,10 @@ def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> Non
 
     message = str(caught.value)
     assert "'hamiltonian['" in message, message
-    assert "terms[0]" in message, message
+    # Not `assert "terms[0]" in message`: the replace takes BOTH bracket
+    # occurrences, so `terms[0]` never survives to be asserted on. The
+    # field noun this test can reach is the renamed one.
+    assert "hamiltonian[0]" in message, message
 
 
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
