@@ -164,6 +164,45 @@ def hamiltonian_from_terms(terms: Any, *, n_wires: int) -> Any:
     )
 
 
+def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
+    """Build the objective, restating the shared refusals in this tool's vocabulary.
+
+    ``validate_pauli_terms`` says "terms" because that is what the list is called
+    inside an ``expectation`` output. Here the caller wrote ``hamiltonian``, so a
+    message about a field they never typed is a message they have to translate.
+    The refusal is the same one and the validation is the same function; only the
+    noun changes.
+
+    Args:
+        hamiltonian: The caller's term list, or ``None``.
+        n_wires: Circuit width every term's Pauli string must match.
+
+    Returns:
+        A ``flagquantum.algorithms.Hamiltonian``.
+
+    Raises:
+        ToolInputError: If the objective is missing or unusable.
+        ToolLimitError: If it carries more terms than the bound allows.
+    """
+    if hamiltonian is None:
+        raise ToolInputError(
+            "hamiltonian is required. Without an objective the value the SDK "
+            "reports is not an energy, and training it would minimise an "
+            "unnamed quantity to convergence and hand back a plausible number. "
+            'Give the Pauli sum to minimise: [{"pauli": "ZZ", "coefficient": '
+            '1.0}, {"pauli": "XI", "coefficient": -0.5}].'
+        )
+    if isinstance(hamiltonian, (list, tuple)) and not hamiltonian:
+        raise ToolInputError(
+            "hamiltonian is empty. A training objective needs at least one "
+            'term, such as [{"pauli": "ZZ", "coefficient": 1.0}].'
+        )
+    try:
+        return hamiltonian_from_terms(hamiltonian, n_wires=n_wires)
+    except ToolInputError as exc:
+        raise ToolInputError(str(exc).replace("'terms'", "'hamiltonian'")) from exc
+
+
 def load_algorithms() -> Any:
     """Return ``flagquantum.algorithms``, where the objective's types live.
 
@@ -292,7 +331,7 @@ def train_parameters(
     names = parameter_names(ir)
     _check_names(names)
     starting = _resolve_values(names, values)
-    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))
+    objective = _objective(hamiltonian, n_wires=int(ir.n_wires))
 
     sdk = load_sdk()
     torch = load_torch()

@@ -680,7 +680,7 @@ def test_a_run_inside_the_budget_is_not_refused(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), 10**400])
-def test_a_non_finite_starting_value_is_refused(bad: float) -> None:
+def test_a_non_finite_starting_value_is_refused(bad: object) -> None:
     """A starting value that is not a finite real reaches the optimizer otherwise.
 
     Measured: without this refusal, ``values={"t0": nan}`` returns
@@ -708,3 +708,98 @@ def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
         train_parameters(ANGLED, TFIM2, "qir", learning_rate=rate)
 
     assert "learning_rate" in str(caught.value)
+
+
+# --- the refusals that matter ---
+
+
+def test_a_circuit_with_no_parameters_is_refused_by_name() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(json.dumps([{"name": "h", "index": [0]}]), [{"pauli": "Z"}], "qir")
+
+    message = str(caught.value)
+    assert "no parameters" in message
+    assert "inspect_parameters_tool" in message
+
+
+def test_a_missing_hamiltonian_is_refused() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, None, "qir")
+
+    assert "hamiltonian" in str(caught.value)
+
+
+def test_an_empty_hamiltonian_is_refused() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [], "qir")
+
+    message = str(caught.value)
+    assert "empty" in message
+    # Both words, because "empty" alone is already true of the shared
+    # validator's message before this task renames anything: it reads
+    # "'terms' is empty". Asserting only that would pass before this task
+    # does its one job, and would keep passing if it never did.
+    assert "hamiltonian" in message
+    assert "'terms'" not in message
+
+
+def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
+    """The typo case: silently ignored, the parameter trains from zero."""
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": 0.1, "t1": 0.1, "t2": 0.1})
+
+    message = str(caught.value)
+    assert "t2" in message
+    assert "t0" in message and "t1" in message
+
+
+def test_a_missing_value_is_refused() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": 0.1})
+
+    assert "t1" in str(caught.value)
+
+
+def test_a_starting_value_that_is_not_a_number_is_refused() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": "0.1", "t1": 0.1})
+
+    assert "t0" in str(caught.value)
+
+
+@pytest.mark.parametrize("steps", [0, -1, 1.5, True, "10"])
+def test_a_step_count_the_loop_cannot_use_is_refused(steps: object) -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", steps=steps)
+
+    assert "steps" in str(caught.value)
+
+
+def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -> None:
+    """The field is never read, so a caller who put the objective there gets nothing."""
+    from flagquantum_mcp_server.circuits import serialize
+    from flagquantum_mcp_server.training import train_parameters
+
+    envelope = json.loads(serialize(ANGLED, "qir")["ir_json"])
+    envelope["observables"] = [{"name": "ZZ", "wires": [0, 1], "coefficient": 1.0}]
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(json.dumps(envelope), TFIM2, "ir")
+
+    message = str(caught.value)
+    assert "observables" in message
+    assert "hamiltonian" in message
