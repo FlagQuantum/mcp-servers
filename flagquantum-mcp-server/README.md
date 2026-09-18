@@ -6,8 +6,8 @@
 
 An [MCP](https://modelcontextprotocol.io) server that gives any MCP-compatible
 agent local access to the [FlagQuantum](https://github.com/flagos-ai/FlagQuantum)
-SDK: build, compile, route, serialize and plan quantum circuits, with no
-credentials, no network access and no hardware submission.
+SDK: build, compile, route, serialize and plan quantum circuits — and run them
+locally — with no credentials, no network access and no hardware submission.
 
 Part of [`FlagQuantum/mcp-servers`](https://github.com/FlagQuantum/mcp-servers).
 
