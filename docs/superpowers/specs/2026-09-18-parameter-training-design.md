@@ -39,16 +39,39 @@ not read off a docstring.
 
 **A serialized circuit can drive `Module` and `train`.** They want a Python
 callable, not JSON, which looked like a dead end. Replaying the IR into a
-closure works, and the replay is exact: rebuilding a circuit from its IR
-through `Circuit.gate(name, wires, params=..., matrix=...)` reproduces the
-source payload byte for byte, matrix gates included.
+closure works, and the replay is faithful: rebuilding a circuit from the
+instructions in its own IR through
+`Circuit.gate(name, wires, params=..., matrix=...)` reproduces that payload byte
+for byte, matrix gates included. A parameterized circuit replayed with tensors
+serializes those tensors as `$tensor` rather than as the `$parameter` symbol it
+came from, which is the difference between a symbol and a value rather than a
+difference in the circuit.
 
 `Circuit.gate` is the single primitive — built-in gates, arbitrary matrices and
 channels all go through it, so the replay layer is a loop and not a gate table.
+It takes its arguments as a `params=` mapping, not positionally:
+`gate("ry", [0], params={"theta": t})`, with the argument names the SDK's own
+gate manifest publishes.
 
-**`Module` accepts named parameters.** `parameters={"alpha": 1}` and
-`init={"alpha": 0.3}` bind by name, matching the circuit's own `$parameter`
-names. The replay does not have to maintain a positional order.
+**`Module` accepts named parameters.** `parameters={"alpha": 1}` declares a
+one-element parameter *group* called `alpha`, and `init={"alpha": 0.3}` gives it
+its starting value. The builder receives a mapping and reads
+`parameters["alpha"][0]`. Names are the circuit's own `$parameter` names, so the
+replay does not have to maintain a positional order.
+
+**The names come from the SDK, and they are sorted.** `Circuit.from_ir(ir)`
+decodes the `$parameter` markers into live symbols and
+`circuit.parameter_names` lists them — alphabetically, each name once however
+many gates carry it. There is no need to compute an order here, and no need to
+parse instructions looking for markers.
+
+**A `{"$parameter": ...}` marker is not a symbol in the Python API.** Handed to
+`Circuit.ry(theta={"$parameter": "t0"})` it is stored as an opaque dict and the
+circuit reports `is_parameterized() == False`; the marker is a *serialization*
+encoding that `Circuit.from_ir` decodes and the Python constructor does not.
+This is the same silent failure `circuits.py` already refuses at the JSON
+boundary, and it is why the replay reads names through `circuit_from_ir` rather
+than from the raw instruction list.
 
 **It converges.** A four-qubit layered ansatz against a transverse-field Ising
 Hamiltonian: loss `+0.9527 → −1.0000` in 100 steps, 0.10 s.
@@ -63,16 +86,31 @@ not need to: the objective is the Hamiltonian expectation and nothing else.
 
 **Cost is a different order of magnitude from `simulate`.**
 
-| width | per step | 100 steps |
-| --- | --- | --- |
-| 8 qubits | ~20 ms | 2 s |
-| 16 qubits | ~32 ms | 3.2 s |
-| 20 qubits | ~300 ms | 30 s |
-| 24 qubits | ~9.1 s | 15 min |
+Per step, warm, on an `ry`/`cx`/`rz` ansatz with one Hamiltonian term per wire.
+One layer of that ansatz has `3n - 1` instructions.
+
+| width | instructions | per step | 100 steps |
+| --- | --- | --- | --- |
+| 4 qubits | 11 | 2.1 ms | 0.2 s |
+| 8 qubits | 23 | 4.1 ms | 0.4 s |
+| 12 qubits | 35 | 4.2–7.2 ms | 0.7 s |
+| 16 qubits | 47 | 32–38 ms | 3.5 s |
+| 20 qubits | 59 | 583 ms | 58 s |
+| 24 qubits | 71 | 23 s | 38 min |
+
+Two costs, and both are visible in that table. At small widths the per-step
+cost is nearly flat and dominated by dispatch — ~2 ms whatever the width. Past
+16 qubits the state the SDK carries takes over and grows as `2 ** n_wires`. Gate
+count matters too, in both regimes: at 16 qubits, four layers cost 116 ms/step
+against one layer's 38 ms.
+
+A first call in a fresh process additionally pays ~0.5 s once, tracing the
+builder with `make_fx`. That is why an unpractised measurement looks like a flat
+~20 ms/step at small widths: the startup landed on 20 steps.
 
 `simulate_circuit_tool`'s worst case at the existing bound is 2.4 s. Training
-at the same width is 15 minutes and up. That difference is the whole reason
-this design has a budget model.
+at 24 qubits is 38 minutes. That difference is the whole reason this design has
+a budget model.
 
 ## Interface
 
@@ -121,14 +159,19 @@ continuation loop is mechanical: call again with `values=parameters`.
 
 ## The replay layer (new module `training.py`)
 
-- `parameter_names_in_order(ir)` — first appearance order, stable.
+- `parameter_names(ir)` — the circuit's own names, from
+  `circuit_from_ir(ir).parameter_names`. Sorted by the SDK, each name once.
 - `replay_builder(ir, names)` — returns the callable `Module` traces. For each
   instruction it calls `Circuit.gate(name, wires, params=..., matrix=...)`,
-  substituting each parameter's tensor by name.
+  substituting `parameters[name][0]` for each symbolic argument and passing
+  every other value through unchanged.
 - `train_parameters(...)` — the tool body.
 
 The replay carries no numerical logic. It translates a serialized circuit into
-the callable shape the SDK asks for, and nothing else.
+the callable shape the SDK asks for, and nothing else. It reads the instruction
+list from `ir.to_dict()`, which is where a `Parameter` becomes the marker a
+caller sees over the wire, rather than from the live objects, whose `params`
+hold SDK types a JSON tool has no business inspecting.
 
 ## Budget model
 
@@ -136,32 +179,47 @@ A prediction decides before any work starts, because the alternative is a
 stdio session that hangs for fifteen minutes with the client blocked.
 
 ```
-per_step        ≈ max(0.02, 2 ** n_wires × 1e-6)   seconds
-predicted_total ≈ steps × per_step
+startup         ≈ 0.5                                     seconds, once
+per_step        ≈ max(0.01, n_instructions × 2 ** n_wires × 3e-8)
+predicted_total ≈ startup + steps × per_step
 ```
 
-Two terms, because cost has two regimes. The `2 ** n_wires` term is the state
-the SDK holds, and the constant is calibrated from the measurements above,
-where `0.29–0.54 µs` per state per step was observed — rounded **up** to `1e-6`
-so it over-predicts. The `0.02` floor is the fixed per-step overhead that
-dominates at small widths, where the observed ~20 ms/step was independent of
-width between 8 and 12 qubits.
+Two terms, because cost has two regimes, and each term is the cost it models
+rather than a fitted fudge. `startup` is the `make_fx` trace, paid once per
+process. `per_step` is work per step: gates applied against a state of
+`2 ** n_wires` amplitudes, so it is the product of the two. The `0.01` floor is
+dispatch — ~2 ms measured, rounded up — which is what dominates at small widths.
+The constant `3e-8` is the only calibrated number: the largest measured point is
+71 instructions × 2²⁴ states at 23 s per step, which gives 1.9e-8, rounded up to
+3e-8.
 
-Checked against every measurement in the table:
+Checked against every measurement above, and against the cold first call:
 
-| width | steps | predicted | measured | direction |
-| --- | --- | --- | --- | --- |
-| 8 | 50 | 1.0 s | ~1 s | close |
-| 16 | 100 | 6.6 s | 3.2 s | over |
-| 20 | 100 | 105 s | 30 s | over |
-| 24 | 100 | 1677 s | 915 s | over |
+| width | layers | steps | predicted | measured | over by |
+| --- | --- | --- | --- | --- | --- |
+| 4 | 1 | 20, cold | 0.70 s | 0.50 s | 1.4× |
+| 4 | 1 | 20 | 0.70 s | 0.04 s | 17× |
+| 8 | 1 | 20 | 0.70 s | 0.08 s | 8.5× |
+| 12 | 1 | 20 | 0.70 s | 0.14 s | 4.9× |
+| 12 | 4 | 20 | 0.84 s | 0.25 s | 3.3× |
+| 16 | 1 | 20 | 2.35 s | 0.76 s | 3.1× |
+| 16 | 4 | 20 | 7.89 s | 2.31 s | 3.4× |
+| 20 | 1 | 20 | 37.6 s | 11.7 s | 3.2× |
+| 24 | 1 | 2 | 72.0 s | 46.0 s | 1.6× |
 
-It over-predicts everywhere, which is the direction that matters: a refusal
-that sometimes declines work that would have fit is a better failure than a
-call that blocks for an hour. A first draft of this model had only the
-`2 ** n_wires` term, which under-predicted at 8 qubits by two orders of
-magnitude — harmless for the decision at a 60 s budget, but wrong as a stated
-model, and this design would have called it conservative when it was not.
+Every row over-predicts, which is the direction that matters: a refusal that
+sometimes declines work that would have fit is a better failure than a call that
+blocks for an hour. The worst case for the decision is the last row, where the
+margin is 1.6× rather than 3× — at 24 qubits the `0.5 s` startup is noise
+against 71 s of work, so the whole prediction rests on the `3e-8` coefficient,
+and the two-step measurement it was calibrated from is the one row with no
+repetition behind it.
+
+A first draft of this model had only a `2 ** n_wires` term and a `0.02` floor,
+calibrated from cold measurements where the one-time trace had been divided
+across the steps. It under-predicted at 16 qubits, and its stated table did not
+reproduce: re-measuring warm gave 4 ms/step at 8 qubits where the draft said 20.
+The model above is the one that survives being checked line by line.
 
 If `predicted_total > FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` (default 60), the tool
 refuses and names the prediction, the width, the steps, and the variable that
@@ -186,12 +244,13 @@ Each is a case where accepting would produce a plausible-looking answer.
 
 ## Tests
 
-- the replay round-trips a circuit through `Module` unchanged, matrix gate included
+- the replay rebuilds a numeric circuit byte for byte, matrix gate included
+- the replayed circuit evaluates to the same energy as the source circuit bound
+  with the same numbers
 - training reduces the loss on a circuit whose optimum is known
 - the returned `parameters` fed back as `values` continues rather than restarts
 - each refusal above, asserting on the message and not only the code
 - the budget refusal fires **before** the run: assert the wall clock stays small
-- the bound is read per call, so a deployment can raise it
 - every new assertion mutation-tested, per AGENTS.md
 
 ## The dependency this needs, and why it is allowed
