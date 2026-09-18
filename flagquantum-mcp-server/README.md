@@ -210,11 +210,28 @@ emitters refuse to lower it. Name the gate `any` instead.
 
 ### On a wire number
 
-Wire numbers must be integers in both formats. This is worth stating because the
-SDK would accept more: it calls `int()` on each wire, so `"1"`, `true`, `1.7` and
-`0.9` all become a wire index. The last one is the reason this is an error rather
-than a convenience — a value that means nothing turns into a circuit that looks
-fine. Both readers refuse all four.
+Wire numbers must be integers in both formats, and the `wires` list must be a
+list. Both are worth stating because the SDK accepts more: it iterates whatever
+it is handed and calls `int()` on each element, so `"1"`, `true`, `1.7` and
+`0.9` are wires, and `"01"` is wires 0 and 1 while `{"0": 1}` is wire 0. The last
+cases are why this is an error rather than a convenience — a value that means
+nothing turns into a circuit that looks fine.
+
+### On the envelope's own fields
+
+The same rule, applied to the fields outside `instructions`. `n_wires` and the
+entries of `shape` are read with `int()`, so `"2"`, `2.7` and `true` are all a
+width; `dtype` is looked up as an attribute on `torch`, so a value that is not a
+string reaches an attribute lookup inside the SDK.
+
+The test for what is refused is **whether information is lost**, not whether the
+JSON type matches the schema exactly. That is why `version: 1.0` is accepted —
+`str(1.0)` reproduces it — while `n_wires: 2.7` is not: it silently becomes 2,
+and `n_wires: true` silently becomes 1.
+
+`dtype` is checked for being a *string* here. Which strings are legal stays with
+the SDK, whose own message names the rule (`complex_dtype must be complex64 or
+complex128`), so the two cannot drift apart.
 
 ### On emitted text
 

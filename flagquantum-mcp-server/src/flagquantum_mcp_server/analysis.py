@@ -12,8 +12,12 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
-from flagquantum_mcp_server._bridge import load_sdk
-from flagquantum_mcp_server.circuits import CircuitFormat, CircuitPayload, resolve_ir
+from flagquantum_mcp_server.circuits import (
+    CircuitFormat,
+    CircuitPayload,
+    circuit_from_ir,
+    resolve_ir,
+)
 
 
 def analyze(circuit: CircuitPayload, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
@@ -31,8 +35,7 @@ def analyze(circuit: CircuitPayload, circuit_format: CircuitFormat = "ir") -> di
         ToolError: If the payload is invalid or exceeds a configured bound.
     """
     ir = resolve_ir(circuit, circuit_format)
-    sdk = load_sdk()
-    analysis = sdk.Circuit.from_ir(ir).analysis()
+    analysis = circuit_from_ir(ir).analysis()
     return {
         "status": "success",
         "circuit": _identity(ir),
@@ -52,10 +55,9 @@ def summarize_ir(ir: Any) -> dict[str, Any]:
     Returns:
         A mapping with ``circuit`` and ``analysis`` keys.
     """
-    sdk = load_sdk()
     return {
         "circuit": _identity(ir),
-        "analysis": _fields(sdk.Circuit.from_ir(ir).analysis()),
+        "analysis": _fields(circuit_from_ir(ir).analysis()),
     }
 
 

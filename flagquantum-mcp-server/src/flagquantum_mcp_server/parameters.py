@@ -15,11 +15,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from flagquantum_mcp_server._bridge import load_sdk
 from flagquantum_mcp_server.analysis import summarize_ir
 from flagquantum_mcp_server.circuits import (
     CircuitFormat,
     CircuitPayload,
+    circuit_from_ir,
     ir_to_json,
     resolve_ir,
 )
@@ -42,8 +42,7 @@ def inspect_parameters(
         circuit, which is still a valid answer rather than an error.
     """
     ir = resolve_ir(circuit, circuit_format)
-    sdk = load_sdk()
-    live = sdk.Circuit.from_ir(ir)
+    live = circuit_from_ir(ir)
     names = tuple(str(name) for name in live.parameter_names)
 
     return {
@@ -80,8 +79,7 @@ def bind_parameters(
             or unknown, or if the SDK rejects a value.
     """
     ir = resolve_ir(circuit, circuit_format)
-    sdk = load_sdk()
-    live = sdk.Circuit.from_ir(ir)
+    live = circuit_from_ir(ir)
     expected = tuple(str(name) for name in live.parameter_names)
 
     if not expected:

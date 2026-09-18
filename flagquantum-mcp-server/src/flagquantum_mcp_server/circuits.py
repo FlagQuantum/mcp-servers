@@ -132,6 +132,7 @@ def _ir_from_decoded(decoded: Any) -> Any:
             "Use serialize_circuit_tool to produce a valid payload, or pass "
             "circuit_format='qir' for a gate list."
         )
+    _check_ir_scalars(decoded)
     _check_ir_node_lists(decoded)
     _check_ir_instructions(decoded)
     sdk = load_sdk()
@@ -145,20 +146,91 @@ def _ir_from_decoded(decoded: Any) -> Any:
         raise ToolInputError(f"Circuit IR failed validation: {exc}") from exc
 
 
+def _check_wires(entry: Mapping[str, Any], where: str) -> None:
+    """Reject a wire list the SDK would coerce instead of reading.
+
+    ``wires`` has to be a list of integers. Anything else is worse than a type
+    error: the SDK iterates whatever it is given and calls ``int()`` on each
+    element, so ``"01"`` becomes wires 0 and 1, ``{"0": 1}`` becomes wire 0, and
+    a float or a bool becomes a wire index. A value that means nothing turns into
+    a circuit that looks fine, which is the same failure as a parameter that
+    silently stops being a symbol.
+
+    The ``qir`` reader refuses every one of these, so this must too — the two
+    formats must not disagree about the same circuit.
+
+    An *absent* key is left to the SDK, whose message for it names what the
+    entry needs ("requires at least one wire"). A key present but null is not
+    absent, and the SDK's message for that names neither the field nor the
+    entry, so it is answered here.
+    """
+    if "wires" not in entry:
+        return
+    value = entry["wires"]
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, Mapping)):
+        raise ToolInputError(
+            f"{where} has wires that are {_describe(value)}; wire numbers must be a list "
+            "of integers such as [0] or [0, 1]."
+        )
+    for wire in value:
+        if isinstance(wire, bool) or not isinstance(wire, int):
+            raise ToolInputError(
+                f"{where} has non-integer wire {wire!r}. The SDK would coerce it "
+                "with int(), so write the wire numbers as integers — a coerced "
+                "wire describes a circuit the caller did not write."
+            )
+
+
+def _check_ir_scalars(decoded: Mapping[str, Any]) -> None:
+    """Check the envelope's own fields where the SDK would coerce a value.
+
+    ``n_wires`` and ``shape`` are read with ``int()``, so ``"2"``, ``2.7`` and
+    ``true`` all become a width — ``true`` on ``n_wires`` silently meaning one
+    wire. ``dtype`` is looked up on ``torch``, so a non-string reaches the
+    attribute lookup and raises AttributeError from inside the SDK.
+
+    Only *lossy* coercions are refused. ``version: 1.0`` is left alone because
+    ``str(1.0)`` reproduces it exactly, and the bare-integer wire shorthand is
+    documented. The test is whether information is lost, not whether the JSON
+    type is the one the schema shows.
+    """
+    for field in ("n_wires",):
+        if field not in decoded:
+            continue
+        value = decoded[field]
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ToolInputError(
+                f"Circuit IR '{field}' is {_describe(value)}; it must be an "
+                "integer. The SDK coerces it, so a float or a boolean would "
+                "silently become a different width."
+            )
+    if "shape" in decoded:
+        shape = decoded["shape"]
+        if not isinstance(shape, Sequence) or isinstance(shape, (str, bytes, Mapping)):
+            raise ToolInputError(
+                f"Circuit IR 'shape' is {_describe(shape)}; it must be a list of "
+                "integers, as the SDK writes it: [batch_size, 2 ** n_wires]."
+            )
+        for dimension in shape:
+            if isinstance(dimension, bool) or not isinstance(dimension, int):
+                raise ToolInputError(
+                    f"Circuit IR 'shape' has non-integer dimension {dimension!r}; "
+                    "it must be a list of integers."
+                )
+    if "dtype" in decoded and not isinstance(decoded["dtype"], str):
+        raise ToolInputError(
+            f"Circuit IR 'dtype' is {_describe(decoded['dtype'])}; it must be a string "
+            'naming a complex type, as the SDK writes it: "complex64".'
+        )
+
+
 def _check_ir_instructions(decoded: Mapping[str, Any]) -> None:
     """Check the parts of an IR payload the SDK leaves unchecked.
 
-    Two kinds of thing are checked here, both for the same reason: the two input
-    formats must not disagree about the same circuit.
-
-    Parameter *values* are not validated by the SDK, so a bare string or a
-    misspelled marker is stored as an opaque value and the circuit stops
-    reporting itself as parameterized.
-
-    Wire numbers *are* validated, but by coercing: the SDK calls ``int()`` on
-    each one, so ``"1"``, ``true``, ``1.7`` and ``0.9`` all become a wire index
-    — a value that means nothing turned into a circuit that looks fine. The
-    ``qir`` reader refuses all four, so this refuses them too.
+    The checks here are parameter *values*, which the SDK does not validate at
+    all, and wire lists, which it validates by coercion. Both are the same
+    failure: a payload the caller meant one way is read another way, or dropped,
+    without anything being reported.
     """
     instructions = decoded.get("instructions")
     if not isinstance(instructions, Sequence) or isinstance(instructions, (str, bytes)):
@@ -168,13 +240,13 @@ def _check_ir_instructions(decoded: Mapping[str, Any]) -> None:
             continue
         prefix = f"Instruction {position}"
         opcode = str(instruction.get("opcode"))
-        _check_ir_wires(instruction.get("wires"), opcode, prefix)
+        _check_wires(instruction, f"{prefix} ({opcode!r})")
         _check_parameter_values(instruction.get("params"), opcode, prefix)
         _check_matrix(opcode, instruction.get(IR_MATRIX_KEY), IR_MATRIX_KEY, prefix)
 
 
 def _check_ir_node_lists(decoded: Mapping[str, Any]) -> None:
-    """Reject an ``observables`` or ``measurements`` value that is not a list.
+    """Check ``observables`` and ``measurements``: a list, of objects, with wires.
 
     The SDK reads both as a sequence of objects and calls ``.get()`` on each
     entry, so anything else raises AttributeError from inside the SDK. Left
@@ -186,33 +258,20 @@ def _check_ir_node_lists(decoded: Mapping[str, Any]) -> None:
         if field not in decoded:
             continue
         value = decoded[field]
-        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        if not isinstance(value, Sequence) or isinstance(value, (str, bytes, Mapping)):
             raise ToolInputError(
-                f"Circuit IR '{field}' {_describe(value)}; it must be a list of "
+                f"Circuit IR '{field}' is {_describe(value)}; it must be a list of "
                 f'objects, empty when the circuit has none: "{field}": [].'
             )
         for position, entry in enumerate(value):
             if not isinstance(entry, Mapping):
                 raise ToolInputError(
-                    f"Circuit IR '{field}'[{position}] {_describe(entry)}; every "
+                    f"Circuit IR '{field}'[{position}] is {_describe(entry)}; every "
                     f"entry must be an object such as "
                     f'{{"name": "ZZ", "wires": [0, 1]}} for an observable, or '
                     f'{{"kind": "counts", "wires": [0]}} for a measurement.'
                 )
-
-
-def _check_ir_wires(wires: Any, opcode: str, prefix: str) -> None:
-    """Reject an IR wire list the SDK would coerce into something else."""
-    if not isinstance(wires, Sequence) or isinstance(wires, (str, bytes)):
-        return
-    for wire in wires:
-        if isinstance(wire, bool) or not isinstance(wire, int):
-            raise ToolInputError(
-                f"{prefix} ({opcode!r}) has non-integer wire {wire!r}. The SDK "
-                "would coerce it with int(), so write the wire numbers as "
-                "integers — the qir format refuses the same values, and a "
-                "coerced wire describes a circuit the caller did not write."
-            )
+            _check_wires(entry, f"Circuit IR '{field}'[{position}]")
 
 
 def _ir_from_qir(decoded: Any) -> Any:
@@ -482,7 +541,7 @@ def _check_parameter_value(value: Any, name: str, gate: str, prefix: str, depth:
         else f"a parameter value is a number or one of {list(VALUE_MARKERS)}"
     )
     raise ToolInputError(
-        f"{prefix} ({gate!r}) parameter {name!r} {_describe(value)}. A gate "
+        f"{prefix} ({gate!r}) parameter {name!r} is {_describe(value)}. A gate "
         "argument is either a number or a symbol written as "
         f'{{"$parameter": "{name}"}}; {reason}, so the circuit would report '
         "itself as unparameterized."
@@ -531,7 +590,7 @@ def _check_expression(expression: Any, name: str, gate: str, prefix: str, depth:
     where = f"{prefix} ({gate!r}) parameter {name!r} '$expression'"
     if not isinstance(expression, Mapping):
         raise ToolInputError(
-            f"{where} {_describe(expression)}; it must be an object with "
+            f"{where} is {_describe(expression)}; it must be an object with "
             "'op' and 'args', as in "
             '{"$expression": {"op": "mul", "args": [2, {"$parameter": "theta"}]}}.'
         )
@@ -549,14 +608,24 @@ def _check_expression(expression: Any, name: str, gate: str, prefix: str, depth:
 
 
 def _describe(value: Any) -> str:
-    """Name a rejected value in the terms the caller wrote it in."""
-    if isinstance(value, str):
-        return f"is a string ({value!r})"
+    """Name a rejected value in the terms the caller wrote it in.
+
+    A noun phrase, never a clause: callers write ``is {_describe(...)}``. It
+    used to include the verb, which produced "is is a string" wherever a caller
+    added one — the same grammar bug three times over, so the verb lives with
+    the caller now.
+    """
     if value is None:
-        return "is null"
+        return "null"
+    if isinstance(value, str):
+        return f"a string ({value!r})"
     if isinstance(value, (list, tuple)):
-        return f"is a list ({value!r})"
-    return f"has unsupported value {value!r}"
+        return f"a list ({value!r})"
+    if isinstance(value, Mapping):
+        return f"an object ({dict(value)!r})"
+    if isinstance(value, bool):
+        return f"a boolean ({value!r})"
+    return f"the unsupported value {value!r}"
 
 
 def enforce_limits(ir: Any) -> Any:
@@ -614,13 +683,34 @@ def ir_to_json(ir: Any, *, indent: int | None = None) -> str:
 def circuit_from_ir(ir: Any) -> Any:
     """Rebuild a live ``Circuit`` from a validated IR.
 
+    This is the single place an IR becomes a live circuit, and every tool uses
+    it rather than calling ``Circuit.from_ir`` directly. Going through one
+    function is what keeps a rebuild failure from reaching the client as an
+    unhandled exception: the SDK reads ``dtype`` by looking the name up on
+    ``torch``, so a value it does not have raises AttributeError from inside a
+    library rather than a validation error a caller can act on.
+
     Args:
         ir: A ``flagquantum.CircuitIR``.
 
     Returns:
         A ``flagquantum.Circuit``.
+
+    Raises:
+        ToolInputError: If the SDK cannot rebuild a circuit from this IR.
     """
-    return load_sdk().Circuit.from_ir(ir)
+    try:
+        return load_sdk().Circuit.from_ir(ir)
+    except (ValueError, TypeError, KeyError, AttributeError) as exc:
+        hint = ""
+        if isinstance(exc, AttributeError) and "torch" in str(exc):
+            # The SDK resolves `dtype` as a torch attribute, so this is the
+            # failure a bad `dtype` produces — and the message names neither
+            # the field nor the circuit.
+            hint = " The 'dtype' field is the most likely cause: it must name a complex type."
+        raise ToolInputError(
+            f"Circuit IR could not be rebuilt into a circuit: {exc}.{hint}"
+        ) from exc
 
 
 def serialize(

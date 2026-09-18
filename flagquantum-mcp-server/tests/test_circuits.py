@@ -506,3 +506,159 @@ def test_the_reserved_matrix_opcode_is_the_one_the_sdk_emits() -> None:
         f"{MATRIX_OPCODE!r} is in the built-in manifest, so _check_matrix would "
         "refuse every explicit unitary"
     )
+
+
+# --- the wire list itself, not just its entries ---
+#
+# The check above refuses a wire whose *value* is not an integer. This is the
+# other half: `wires` that is not a list at all. The SDK iterates whatever it is
+# handed and int()s each element, so "01" becomes wires 0 and 1 and {"0": 1}
+# becomes wire 0 — a payload the caller meant one way read another way.
+
+
+@pytest.mark.parametrize("wires", ["0", "01", {"0": 1}, 1, None, 2.5])
+def test_ir_refuses_a_wires_field_that_is_not_a_list(wires: object) -> None:
+    with pytest.raises(ToolInputError, match="wires that are"):
+        resolve_ir(_with_instruction({"opcode": "h", "wires": wires, "params": {}}), IR_FORMAT)
+
+
+def test_ir_still_accepts_a_list_of_wires() -> None:
+    ir = resolve_ir(_with_instruction({"opcode": "cx", "wires": [0, 1], "params": {}}), IR_FORMAT)
+
+    assert ir.instructions[0].wires == (0, 1)
+
+
+def test_an_absent_wires_key_is_left_to_the_sdk() -> None:
+    """Absent is not the same as null, and the SDK's message for absent is good."""
+    with pytest.raises(ToolInputError, match="requires at least one wire"):
+        resolve_ir(_with_instruction({"opcode": "h", "params": {}}), IR_FORMAT)
+
+
+@pytest.mark.parametrize("wires", ["01", 0, None, {"0": 1}])
+def test_the_same_rule_applies_to_observables_and_measurements(wires: object) -> None:
+    payload = _ir_payload(observables=[{"name": "zz", "wires": wires}])
+
+    with pytest.raises(ToolInputError, match=r"observables'\[0\]"):
+        resolve_ir(payload, IR_FORMAT)
+
+
+# --- envelope fields the SDK coerces ---
+
+
+@pytest.mark.parametrize("width", ["2", 2.7, True, [2], None])
+def test_ir_refuses_a_coerced_n_wires(width: object) -> None:
+    with pytest.raises(ToolInputError, match="'n_wires'"):
+        resolve_ir(_ir_payload(n_wires=width), IR_FORMAT)
+
+
+@pytest.mark.parametrize("shape", ["4", 4, [2.5], [True], [None]])
+def test_ir_refuses_a_coerced_shape(shape: object) -> None:
+    with pytest.raises(ToolInputError, match="'shape'"):
+        resolve_ir(_ir_payload(shape=shape), IR_FORMAT)
+
+
+@pytest.mark.parametrize("dtype", [5, None, [], ["complex64"], 1.5])
+def test_ir_refuses_a_non_string_dtype(dtype: object) -> None:
+    """A non-string dtype reaches a torch attribute lookup inside the SDK.
+
+    That raises AttributeError from a library, which used to reach the client as
+    INTERNAL_ERROR — this server reporting a bug over a payload that is simply
+    wrong. The value check stays with the SDK, whose message names the rule
+    ("complex_dtype must be complex64 or complex128").
+    """
+    with pytest.raises(ToolInputError, match="'dtype'"):
+        resolve_ir(_ir_payload(dtype=dtype), IR_FORMAT)
+
+
+@pytest.mark.parametrize("dtype", ["complex64", "complex128"])
+def test_ir_still_accepts_the_dtypes_the_sdk_writes(dtype: str) -> None:
+    assert resolve_ir(_ir_payload(dtype=dtype), IR_FORMAT).dtype == dtype
+
+
+@pytest.mark.parametrize("dtype", ["float32", "nonsense", "complex32"])
+def test_a_dtype_the_sdk_cannot_build_with_is_an_input_error(dtype: str) -> None:
+    """Resolving succeeds; rebuilding the Circuit is where the SDK objects.
+
+    ``float32`` is a real torch dtype but not a legal complex width, ``complex32``
+    is the reverse, and ``nonsense`` is neither. All three reach the same
+    attribute lookup or rule check inside the SDK, and all three used to arrive
+    at the client as INTERNAL_ERROR.
+    """
+    with pytest.raises(ToolInputError):
+        analyze(_ir_payload(dtype=dtype), IR_FORMAT)
+
+
+def test_a_dtype_torch_does_not_have_names_the_field() -> None:
+    with pytest.raises(ToolInputError, match="'dtype' field is the most likely cause"):
+        analyze(_ir_payload(dtype="nonsense"), IR_FORMAT)
+
+
+# --- error message grammar ---
+#
+# `_describe` used to include its own verb, so every caller that added one
+# produced "is is a string" — three separate occurrences. It now returns a noun
+# phrase, and this reads every message the boundary can produce to be sure.
+
+
+def _every_rejection_message() -> list[str]:
+    """Collect the message from a wide sweep of malformed payloads."""
+    payloads = (
+        [
+            _with_instruction({"opcode": "h", "wires": w, "params": {}})
+            for w in ["0", None, 1, {"a": 1}, [True]]
+        ]
+        + [
+            _ir_payload(**kw)
+            for kw in [
+                {"n_wires": "2"},
+                {"n_wires": 2.7},
+                {"shape": "4"},
+                {"shape": [2.5]},
+                {"dtype": 5},
+                {"dtype": []},
+                {"observables": "ZZ"},
+                {"observables": [1]},
+                {"observables": None},
+                {"observables": [{"name": "zz", "wires": "01"}]},
+                {"measurements": {"kind": "counts"}},
+            ]
+        ]
+        + [
+            _with_instruction({"opcode": "ry", "wires": [0], "params": {"theta": v}})
+            for v in ["theta", None, [1], {}, {"$bogus": 1}, {"$parameter": 3}]
+        ]
+        + [
+            _with_instruction(
+                {"opcode": "ry", "wires": [0], "params": {"theta": {"$expression": e}}}
+            )
+            for e in ["mul", {"op": "mul"}, {"op": "m", "args": 2}]
+        ]
+        + [
+            _with_instruction({"opcode": "h", "wires": [0], "params": {}, "matrix": IDENTITY}),
+            _with_instruction({"opcode": "cx", "wires": [0], "params": {}}),
+            _with_instruction({"opcode": "nope", "wires": [0], "params": {}}),
+        ]
+    )
+
+    messages: list[str] = []
+    for payload in payloads:
+        with pytest.raises(ToolInputError) as caught:
+            resolve_ir(payload, IR_FORMAT)
+        messages.append(str(caught.value))
+    return messages
+
+
+def test_no_rejection_message_says_is_is_or_is_has() -> None:
+    """Guards the grammar of every message, since they are read by a model."""
+    joined = "\n".join(_every_rejection_message())
+
+    assert " is is " not in joined
+    assert " is has " not in joined
+    assert " has wires has " not in joined
+
+
+def test_every_rejection_message_is_substantial() -> None:
+    """A refusal a caller cannot act on is barely better than a silent one."""
+    for message in _every_rejection_message():
+        assert len(message) > 60, message
+        assert message[0].isupper(), message

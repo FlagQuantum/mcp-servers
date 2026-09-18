@@ -14,10 +14,11 @@ from __future__ import annotations
 from typing import Any
 
 from flagquantum_mcp_server import limits
-from flagquantum_mcp_server._bridge import load_attribute, load_sdk
+from flagquantum_mcp_server._bridge import load_attribute
 from flagquantum_mcp_server.circuits import (
     CircuitFormat,
     CircuitPayload,
+    circuit_from_ir,
     resolve_ir,
 )
 from flagquantum_mcp_server.errors import ToolLimitError, UnsupportedFormatError
@@ -67,7 +68,7 @@ def draw_circuit(
         raise UnsupportedFormatError(f"line_width must be positive; received {line_width}.")
 
     ir = resolve_ir(circuit, circuit_format)
-    live = load_sdk().Circuit.from_ir(ir)
+    live = circuit_from_ir(ir)
     draw = load_attribute(DRAWER_MODULE, DRAW_FUNCTION)
 
     try:
