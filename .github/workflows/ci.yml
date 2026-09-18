@@ -15,9 +15,9 @@ jobs:
     name: Lint and types
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -52,9 +52,9 @@ jobs:
         # requires-python, so it is not tested here either.
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -77,9 +77,9 @@ jobs:
     name: Build and smoke-test the wheel
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -95,9 +95,44 @@ jobs:
           /tmp/wheelcheck/bin/python -m pip install --upgrade pip
           /tmp/wheelcheck/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           /tmp/wheelcheck/bin/python -m pip install flagquantum-mcp-server/dist/*.whl
-          /tmp/wheelcheck/bin/python -c "
-          import flagquantum_mcp_server
-          print('import ok', flagquantum_mcp_server.__version__)
-          "
-          /tmp/wheelcheck/bin/flagquantum-mcp-server --help >/dev/null 2>&1 || true
-          test -x /tmp/wheelcheck/bin/flagquantum-mcp-server
+
+      - name: The installed console script must complete an MCP handshake
+        # The integration tests exercise an editable install from source. This
+        # is the only check that the *built wheel* works, so it speaks the
+        # protocol to the installed entry point rather than just importing it.
+        run: |
+          /tmp/wheelcheck/bin/python - <<'PY'
+          import json, subprocess, sys
+
+          proc = subprocess.Popen(
+              ["/tmp/wheelcheck/bin/flagquantum-mcp-server"],
+              stdin=subprocess.PIPE,
+              stdout=subprocess.PIPE,
+              stderr=subprocess.PIPE,
+              text=True,
+          )
+
+          def send(message):
+              proc.stdin.write(json.dumps(message) + "\n")
+              proc.stdin.flush()
+
+          def receive():
+              return json.loads(proc.stdout.readline())
+
+          send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+              "protocolVersion": "2025-06-18", "capabilities": {},
+              "clientInfo": {"name": "ci", "version": "1"},
+          }})
+          info = receive()["result"]["serverInfo"]
+          send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+          send({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+          tools = receive()["result"]["tools"]
+
+          proc.stdin.close()
+          proc.wait(timeout=30)
+
+          assert info["name"] == "FlagQuantum", info
+          assert len(tools) == 9, [tool["name"] for tool in tools]
+          assert proc.returncode == 0, proc.stderr.read()
+          print(f"handshake ok: {info}, {len(tools)} tools")
+          PY
