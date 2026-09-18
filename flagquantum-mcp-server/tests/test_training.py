@@ -27,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from flagquantum_mcp_server.errors import ToolInputError
+from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
 from flagquantum_mcp_server.training import parameter_names, replay_builder
 
 pytestmark = pytest.mark.unit
@@ -496,3 +496,173 @@ def test_a_pauli_letter_lands_on_the_wire_its_position_names() -> None:
 
     assert hamiltonian_from_terms([{"pauli": "IX"}], n_wires=2).terms[0].ops == ((1, "x"),)
     assert hamiltonian_from_terms([{"pauli": "XI"}], n_wires=2).terms[0].ops == ((0, "x"),)
+
+
+# --- the run ---
+
+# -Z0Z1 + X0 + X1, whose ground energy is -2.2360679... (=-sqrt(5)).
+TFIM2 = [
+    {"pauli": "ZZ", "coefficient": -1.0},
+    {"pauli": "XI", "coefficient": 1.0},
+    {"pauli": "IX", "coefficient": 1.0},
+]
+
+
+def test_training_returns_a_trajectory_and_the_parameters_it_ended_on() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=20, learning_rate=0.3)
+
+    assert payload["status"] == "success"
+    assert payload["completed_steps"] == 20
+    assert len(payload["losses"]) == 20
+    assert set(payload["parameters"]) == {"t0", "t1"}
+    assert payload["circuit"]["n_qubits"] == 2
+
+
+def test_the_hamiltonian_reaches_the_objective() -> None:
+    """The test this whole module exists for.
+
+    With the default policy the SDK evaluates ⟨Z₀⟩ and ignores the Hamiltonian,
+    so a run against ``-Z0Z1 + X0 + X1`` would converge to -1 while claiming to
+    have found the ground state. The energy here has to approach -sqrt(5).
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=200, learning_rate=0.2)
+
+    assert payload["final_loss"] == pytest.approx(-(5**0.5), abs=0.05)
+
+
+def test_the_objective_is_the_hamiltonian_and_not_the_first_wire_s_z() -> None:
+    """One step in, the two objectives are already different numbers.
+
+    At the default all-zero starting angles the circuit is ``|00⟩``, so
+    ``-Z₀Z₁ + X₀ + X₁`` evaluates to ``-1`` while ``⟨Z₀⟩`` evaluates to ``+1``.
+    A run that reports ``+1`` is measuring the wrong operator, which is the trap
+    this design was rewritten around, and the sign is what makes it visible in a
+    single call rather than after two hundred.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=1)
+
+    assert payload["initial_loss"] == pytest.approx(-1.0, abs=1e-5)
+
+
+def test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before() -> None:
+    """The continuation promise: resume and the curve joins without a step back."""
+    from flagquantum_mcp_server.training import train_parameters
+
+    first = train_parameters(ANGLED, TFIM2, "qir", steps=5, learning_rate=0.3)
+    resumed = train_parameters(
+        ANGLED, TFIM2, "qir", values=first["parameters"], steps=5, learning_rate=0.3
+    )
+
+    assert resumed["initial_loss"] == pytest.approx(first["final_loss"], abs=1e-6)
+    assert resumed["initial_parameters"] == pytest.approx(first["parameters"])
+    # The guard that keeps the assertion above from passing vacuously: if the
+    # optimizer did nothing, initial and final would be the same number and the
+    # equality would hold no matter what `final_loss` were computed from. This
+    # is NOT the continuation claim — the equality above is — so it asserts only
+    # that the resumed run improved.
+    assert resumed["final_loss"] < resumed["initial_loss"]
+
+
+def test_the_reported_parameters_are_what_the_next_call_starts_from() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=3, learning_rate=0.3)
+    again = train_parameters(ANGLED, TFIM2, "qir", values=payload["parameters"], steps=1)
+
+    assert again["initial_parameters"] == pytest.approx(payload["parameters"])
+
+
+def test_the_execution_block_says_where_the_sdk_ran_this() -> None:
+    """A Module run reports its own runtime shape, not a fq.run one.
+
+    Measured: ``Module.execute()`` returns a runtime block holding ``executor``,
+    ``backend``, ``mode``, ``world_size`` and ``node_count``, and no
+    ``execution_path`` or ``platform_provider`` at all. So this tool restates
+    what its own SDK call reported rather than reusing the simulation's field
+    names, which would come back empty.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=1)
+
+    assert payload["execution"]["backend"] == "pytorch"
+    assert payload["execution"]["mode"] == "statevector"
+    assert payload["execution"]["node_count"] == 1
+    assert payload["execution"]["world_size"] == 1
+    assert payload["execution"]["accuracy"]["metric"] == "not_measured"
+
+
+def test_values_defaults_to_zero_and_says_so() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    payload = train_parameters(ANGLED, TFIM2, "qir", steps=1)
+
+    assert payload["initial_parameters"] == {"t0": 0.0, "t1": 0.0}
+
+
+def test_a_different_learning_rate_changes_the_run() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    slow = train_parameters(ANGLED, TFIM2, "qir", steps=5, learning_rate=0.01)
+    fast = train_parameters(ANGLED, TFIM2, "qir", steps=5, learning_rate=0.5)
+
+    assert slow["parameters"] != fast["parameters"]
+
+
+def test_a_different_step_count_changes_the_run() -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    short = train_parameters(ANGLED, TFIM2, "qir", steps=1, learning_rate=0.3)
+    longer = train_parameters(ANGLED, TFIM2, "qir", steps=4, learning_rate=0.3)
+
+    assert short["completed_steps"] == 1
+    assert longer["completed_steps"] == 4
+
+
+def test_the_parameters_argument_is_not_mutated_by_the_call() -> None:
+    """Rule 5: read-only over the caller's inputs."""
+    from flagquantum_mcp_server.training import train_parameters
+
+    values = {"t0": 0.25, "t1": -0.5}
+    train_parameters(ANGLED, TFIM2, "qir", values=values, steps=2)
+
+    assert values == {"t0": 0.25, "t1": -0.5}
+
+
+# --- the budget ---
+
+
+def test_a_run_past_the_budget_is_refused_before_any_work_starts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refused before, not after: the client is never left waiting."""
+    import time
+
+    from flagquantum_mcp_server.training import train_parameters
+
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "1")
+    wide = json.dumps(_layered_qir(16))
+    started = time.perf_counter()
+
+    with pytest.raises(ToolLimitError) as caught:
+        train_parameters(wide, [{"pauli": "I" * 16, "coefficient": 1.0}], "qir", steps=5000)
+
+    assert time.perf_counter() - started < 1.0, "the refusal did no work"
+    message = str(caught.value)
+    assert "16" in message
+    assert "5000" in message
+    assert "FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS" in message
+
+
+def test_a_run_inside_the_budget_is_not_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "1")
+
+    assert train_parameters(ANGLED, TFIM2, "qir", steps=1)["status"] == "success"
