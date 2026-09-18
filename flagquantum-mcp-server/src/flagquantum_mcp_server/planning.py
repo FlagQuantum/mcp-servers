@@ -251,20 +251,14 @@ def _build_output(spec: Mapping[str, Any], *, n_wires: int) -> Any:
     return sdk.samples(wires, name=name)
 
 
-def _hamiltonian_observable(terms: Any, *, n_wires: int) -> Any:
-    """Build a weighted sum of Pauli strings from a ``terms`` list.
+def validate_pauli_terms(terms: Any, *, n_wires: int) -> list[tuple[str, float]]:
+    """Validate a ``terms`` list and return its Pauli strings and coefficients.
 
-    The SDK already evaluates a multi-term observable, returning one row per
-    term with its coefficient in the row's metadata, so this builder is the
-    whole of what was missing: a way to say "these terms" through JSON. It
-    deliberately does not add the rows up — that sum is the caller's, from
-    numbers the SDK produced, and inventing it here would be this server
-    reporting a value the SDK never computed.
-
-    Only ``+`` and scalar ``*`` on the SDK's public ``Z``/``X``/``Y`` builders
-    are used. The term type underneath is private, and naming it here would
-    make a private class part of this server's contract; the operators build it
-    without ever spelling it.
+    The vocabulary ``{"pauli": "ZZ", "coefficient": 1.0}`` is one concept, so it
+    has one validator: the expectation builder in this module and the training
+    objective in ``training.py`` both call this rather than each deciding for
+    themselves what a term may say. One concept with two validators drifts into
+    two concepts.
 
     Args:
         terms: A non-empty list of ``{"pauli": ..., "coefficient": ...}``
@@ -272,7 +266,8 @@ def _hamiltonian_observable(terms: Any, *, n_wires: int) -> Any:
         n_wires: Circuit width every term's Pauli string must match.
 
     Returns:
-        A ``flagquantum.Observable``.
+        One ``(pauli, coefficient)`` pair per term, in the caller's order, with
+        the Pauli string upper-cased.
 
     Raises:
         ToolInputError: If the list, a term, a Pauli string, or a coefficient is
@@ -296,16 +291,15 @@ def _hamiltonian_observable(terms: Any, *, n_wires: int) -> Any:
             "request may ask for. FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS raises "
             "the bound for a deployment that needs a larger operator."
         )
-
-    total: Any = None
-    for position, term in enumerate(terms):
-        observable = _weighted_term(term, position, n_wires=n_wires)
-        total = observable if total is None else total + observable
-    return total
+    return [_weighted_term(term, position, n_wires=n_wires) for position, term in enumerate(terms)]
 
 
-def _weighted_term(term: Any, position: int, *, n_wires: int) -> Any:
-    """Build one weighted Pauli term, naming its position in every refusal."""
+def _weighted_term(term: Any, position: int, *, n_wires: int) -> tuple[str, float]:
+    """Validate one weighted Pauli term, naming its position in every refusal.
+
+    Returns:
+        The upper-cased Pauli string and its coefficient.
+    """
     where = f"terms[{position}]"
     if not isinstance(term, Mapping):
         raise ToolInputError(
@@ -333,7 +327,43 @@ def _weighted_term(term: Any, position: int, *, n_wires: int) -> Any:
             "builds a parameter expression from one rather than an observable, "
             "so it cannot be evaluated."
         )
-    return _pauli_observable(pauli, n_wires=n_wires, where=where) * float(coefficient)
+    _check_pauli_string(pauli, n_wires=n_wires, where=where)
+    return pauli.upper(), float(coefficient)
+
+
+def _hamiltonian_observable(terms: Any, *, n_wires: int) -> Any:
+    """Build a weighted sum of Pauli strings from a ``terms`` list.
+
+    The SDK already evaluates a multi-term observable, returning one row per
+    term with its coefficient in the row's metadata, so this builder is the
+    whole of what was missing: a way to say "these terms" through JSON. It
+    deliberately does not add the rows up — that sum is the caller's, from
+    numbers the SDK produced, and inventing it here would be this server
+    reporting a value the SDK never computed.
+
+    Only ``+`` and scalar ``*`` on the SDK's public ``Z``/``X``/``Y`` builders
+    are used. The term type underneath is private, and naming it here would
+    make a private class part of this server's contract; the operators build it
+    without ever spelling it.
+
+    Args:
+        terms: A non-empty list of ``{"pauli": ..., "coefficient": ...}``
+            mappings.
+        n_wires: Circuit width every term's Pauli string must match.
+
+    Returns:
+        A ``flagquantum.Observable``.
+
+    Raises:
+        ToolInputError: If the list, a term, a Pauli string, or a coefficient is
+            unusable.
+        ToolLimitError: If the list carries more terms than the bound allows.
+    """
+    total: Any = None
+    for pauli, coefficient in validate_pauli_terms(terms, n_wires=n_wires):
+        observable = _pauli_observable(pauli, n_wires=n_wires) * coefficient
+        total = observable if total is None else total + observable
+    return total
 
 
 def _name_of(value: Any) -> str:
@@ -349,6 +379,39 @@ def _name_of(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return f"a list ({list(value)!r})"
     return f"the unsupported value {value!r}"
+
+
+def _check_pauli_string(pauli: str, *, n_wires: int, where: str | None = None) -> None:
+    """Check a Pauli string's length, alphabet and content.
+
+    Args:
+        pauli: One letter per wire, drawn from ``I``, ``X``, ``Y``, ``Z``.
+        n_wires: Circuit width the string must match.
+        where: How to name the caller's location in a refusal, when this string
+            is one term of several rather than the whole request.
+
+    Raises:
+        ToolInputError: If the string is malformed, is entirely identity, or
+            does not match the circuit width.
+    """
+    subject = "Pauli string" if where is None else f"{where} 'pauli'"
+    upper = pauli.upper()
+    if len(upper) != n_wires:
+        raise ToolInputError(
+            f"{subject} {pauli!r} covers {len(upper)} wires, but the circuit has "
+            f"{n_wires}. One letter per wire is required."
+        )
+    bad = sorted(set(upper) - PAULI_LETTERS)
+    if bad:
+        raise ToolInputError(
+            f"{subject} {pauli!r} contains unsupported letters {bad}; "
+            f"use only {sorted(PAULI_LETTERS)}."
+        )
+    if not any(letter != "I" for letter in upper):
+        raise ToolInputError(
+            f"{subject} {pauli!r} is entirely identity, which is not a measurable "
+            "observable. Drop the term, or name a wire it acts on."
+        )
 
 
 def _pauli_observable(pauli: str, *, n_wires: int, where: str | None = None) -> Any:
