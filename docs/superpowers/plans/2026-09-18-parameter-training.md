@@ -1504,68 +1504,38 @@ Expected: FAIL with `ImportError: cannot import name 'predict_seconds'`
 
 - [ ] **Step 3: Write the model**
 
-Add to `training.py`. No new imports: this is arithmetic on `ir` and `steps`,
-and the three constants it defines are the module's own.
+Do not write it from this plan. **The shipped `predict_seconds` is the authority
+for this task.** The first version of the model — one width-independent floor plus
+one coefficient — was measured under-predicting by up to 105x in the
+low-instruction region, and every code block that described it has been removed
+from this document rather than left where a reader could copy it. Read the
+function and its constants in `training.py` before changing either.
 
-```python
-# The budget model's three constants. Calibrated from warm per-step measurements
-# at 4, 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits; the table is in the design
-# document and every point is pinned by a test. The model over-predicts at all
-# of them, by 1.7x at the worst.
-STARTUP_SECONDS = 0.5
-MIN_STEP_SECONDS = 0.02
-STEP_COST_COEFFICIENT = 1e-7
+What this step still owns is the shape, because it is what the tests below assert:
 
-
-def predict_seconds(ir: Any, steps: int) -> float:
-    """Predict how long ``steps`` updates will take, in seconds.
-
-    Two terms, because cost has two regimes. ``STARTUP_SECONDS`` is the one-time
-    ``make_fx`` trace ``Module`` performs when it first compiles the builder.
-    The rest is work: gates applied against a state of ``2 ** n_wires``
-    amplitudes, so it is the product of the two, floored at the dispatch cost
-    that dominates at small widths.
-
-    The floor is generous on purpose. It is 20 ms where 1.8 ms was measured at
-    four qubits, which at the default 60-second budget is the difference between
-    a caller being allowed three thousand steps and thirty thousand. Three
-    thousand is already more than anyone reads, and a model that is an upper
-    bound everywhere is worth more than one that is tight at the bottom.
-
-    A single coefficient cannot follow the true curve, which falls from 1.0e-5
-    per instruction-state at four qubits to 2.1e-8 at twenty and rises again to
-    5.7e-8 at twenty-four as the state stops fitting where it used to. The
-    coefficient clears the highest point rather than the average one.
-
-    Where that leaves the margin, over every width it was calibrated at: 11x at
-    four qubits and 4.9x at eight, where the floor is doing all the work; 2.0x
-    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest and
-    the one that matters least, since a single step there is 68 s and the budget
-    refuses every run above two steps anyway.
-
-    Args:
-        ir: A validated ``CircuitIR``.
-        steps: The number of updates requested.
-
-    Returns:
-        A prediction in seconds. An estimate rather than a measurement of the
-        caller's machine.
-    """
-    per_step = max(
-        MIN_STEP_SECONDS,
-        len(ir.instructions) * 2.0 ** int(ir.n_wires) * STEP_COST_COEFFICIENT,
-    )
-    return STARTUP_SECONDS + steps * per_step
 ```
+per_step = max(MIN_STEP_SECONDS,
+               2 ** n_wires * STATE_COST,                   # holding the state
+               n_instructions * 2 ** n_wires * GATE_COST)   # applying gates
+```
+
+Three terms. The floor is dispatch. The state term is the one the first model
+lacked: at 24 wires, holding the state costs 12.5 s per step even with a single
+gate, which is 7.5x what one instruction explains. The gate term is the marginal
+cost of applying gates against that state.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS, 15 tests in this file (11 from Task 4, 4 here).
+Expected: PASS. This step adds four tests; read the count off the run and check
+it rose by four.
 
 - [ ] **Step 5: Mutation-test the model's direction**
 
-The claim is that the prediction is an upper bound. Break it downward and confirm the calibration test notices.
+The claim is that the prediction is an upper bound everywhere it was calibrated.
+Break each term downward and confirm the calibration test notices — one mutation
+per term, each with its own guard, because a single mutation that drops two
+constants at once proves neither.
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
@@ -1574,15 +1544,36 @@ from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
 Path(str(p) + ".mutbak").write_text(before)
-after = before.replace("STEP_COST_COEFFICIENT = 1e-7", "STEP_COST_COEFFICIENT = 1e-9")
+after = before.replace("GATE_COST = 1e-7", "GATE_COST = 1e-9")
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
-Expected: FAIL, naming the width whose prediction fell below its measurement. Then confirm the floor is load-bearing the same way:
+Expected: FAIL, naming the rows whose prediction fell below their measurement.
+Then the state term:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
+python3 - <<'PY'
+from pathlib import Path
+p = Path("src/flagquantum_mcp_server/training.py")
+before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
+after = before.replace("STATE_COST = 1.5e-6", "STATE_COST = 1e-9")
+assert after != before, "mutation did not apply"
+p.write_text(after)
+PY
+../.venv/bin/pytest tests/test_training.py -k over_predicts -q
+python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
+```
+
+Expected: FAIL on the low-instruction rows — `(16, 3)`, `(20, 1)`, `(22, 1)`,
+`(24, 1)`, `(24, 4)` — which is the whole reason the term exists. Then the floor:
 
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
@@ -1597,9 +1588,10 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
-Expected: FAIL at 4 and 8 qubits.
+Expected: FAIL at the three floor-bound rows, 4, 8 and 12 wires.
 
 - [ ] **Step 6: Commit**
 
@@ -2419,8 +2411,7 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
             or not math.isfinite(value)
         ):
             raise ToolInputError(
-                f"values[{name!r}] is {value!r}; every starting value must be a "
-                "finite real number."
+                f"values[{name!r}] is {value!r}; every starting value must be a finite real number."
             )
         resolved[name] = float(value)
     return resolved
