@@ -222,10 +222,23 @@ watching a curve would see it step backwards on resume.
 - `train_parameters(...)` — the tool body.
 
 The replay carries no numerical logic. It translates a serialized circuit into
-the callable shape the SDK asks for, and nothing else. It reads the instruction
-list from `ir.to_dict()`, which is where a `Parameter` becomes the marker a
-caller sees over the wire, rather than from the live objects, whose `params`
-hold SDK types a JSON tool has no business inspecting.
+the callable shape the SDK asks for, and nothing else.
+
+**It reads the IR's live `instructions`, not `ir.to_dict()`**, and this is the
+one place in this design where the intuitive choice is the broken one.
+`to_dict()` runs every value through the SDK's encoder: a `Parameter` becomes
+`{"$parameter": ...}`, a complex becomes `{"$complex": [...]}`, and a matrix's
+entries the same way. Handing those encodings back to `Circuit.gate` builds a
+circuit that **serializes byte-for-byte like the original and cannot execute** —
+`fq.run` refuses it with `planned execution failed` while the source runs
+normally. An earlier version of this design specified `to_dict()` and the replay
+it produced was byte-equal to its source, which is what made the defect hard to
+see: everything a test might compare said the two circuits were identical.
+
+The live objects are `Parameter`, `ParameterExpression` and real matrices, which
+is what the builder needs. A symbolic argument is resolved through the SDK's
+public `ParameterExpression.bind`, so the arithmetic stays the SDK's rather than
+being reimplemented here.
 
 ## Budget model
 
