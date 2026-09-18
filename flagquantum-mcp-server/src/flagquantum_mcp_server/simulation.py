@@ -29,7 +29,6 @@ answer.
 
 from __future__ import annotations
 
-import dataclasses
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -41,6 +40,11 @@ from flagquantum_mcp_server.planning import (
     _build_options,
     _build_outputs,
     _require_shots_for_sampling,
+)
+from flagquantum_mcp_server.preconditions import (
+    SDK_FAILURE_BASES,
+    plain,
+    reject_circuit_observables,
     reject_outputs_with_declared_measurements,
 )
 
@@ -76,7 +80,16 @@ def simulate_execution(
             interaction between an output request and the circuit is invalid.
     """
     ir = resolve_ir(circuit, circuit_format)
-    _reject_circuit_observables(ir)
+    reject_circuit_observables(
+        ir,
+        remedy=(
+            "Ask for the expectation directly instead — pass "
+            'outputs=[{"kind": "expectation", "pauli": "ZZ"}] for a single '
+            'term, or a \'terms\' list of {"pauli": ..., "coefficient": ...} '
+            "objects to measure a weighted sum in one call, or drop the field "
+            "from the circuit."
+        ),
+    )
     _reject_unbound_parameters(ir)
 
     requested = _resolve_request(outputs, ir, n_wires=int(ir.n_wires))
@@ -86,12 +99,7 @@ def simulate_execution(
 
     try:
         result = sdk.run(ir, options=_build_options(options), outputs=built)
-    except (ValueError, RuntimeError, NotImplementedError) as exc:
-        # The three SDK exception bases reachable from here: ValidationError is
-        # a ValueError, ExecutionError a RuntimeError, CapabilityError a
-        # NotImplementedError. The try block holds one SDK call and nothing
-        # else, and the caller mistakes this module knows about are refused
-        # above, so what arrives here is the SDK describing the request.
+    except SDK_FAILURE_BASES as exc:
         raise ToolInputError(_with_guidance(str(exc))) from exc
 
     resolved = [_measurement(item) for item in result.measurements]
@@ -101,44 +109,6 @@ def simulate_execution(
         "outputs": resolved,
         "execution": _execution_provenance(result),
     }
-
-
-def _reject_circuit_observables(ir: Any) -> None:
-    """Refuse a circuit that carries observables, and name the spelling that works.
-
-    ``CircuitIR.observables`` is a real field: it serializes, it is covered by
-    ``content_hash``, it is validated on the way in, and a coefficient may be a
-    symbol, so it even shows up in the parameter list. The default statevector
-    path does not read it. Only the hybrid operator path does, and that path
-    demands a sum of unit single-wire Z terms and says so.
-
-    An agent that followed this server's own ``flagquantum://ir-schema``
-    resource would put its Hamiltonian exactly here and get a result with no
-    expectation value in it, and nothing anywhere would have said so. Rather
-    than reimplement the SDK's private lowering — the observable's name is
-    lowercased but never checked against I/X/Y/Z, so it can legally read
-    ``"heisenberg"`` — the field is refused and the working output spelling is
-    given.
-
-    Args:
-        ir: The validated ``CircuitIR``.
-
-    Raises:
-        ToolInputError: If the circuit carries any observable.
-    """
-    observables = tuple(getattr(ir, "observables", ()) or ())
-    if not observables:
-        return
-    raise ToolInputError(
-        f"This circuit's 'observables' field carries {len(observables)} "
-        "entr(ies), and a local simulation does not evaluate them: the default "
-        "statevector path never reads the field, so the result would carry no "
-        "expectation value and no error either. Ask for the expectation "
-        'directly instead — pass outputs=[{"kind": "expectation", '
-        '"pauli": "ZZ"}] for a single term, or a \'terms\' list of '
-        '{"pauli": ..., "coefficient": ...} objects to measure a weighted '
-        "sum in one call, or drop the field from the circuit."
-    )
 
 
 MARGINAL_LIMIT_MARKER = "max_marginal_wires"
@@ -248,7 +218,7 @@ def _measurement(item: Any) -> dict[str, Any]:
         "kind": str(item.kind),
         "wires": [int(wire) for wire in item.wires],
         "shots": None if item.shots is None else int(item.shots),
-        "value": _plain(item.value),
+        "value": plain(item.value),
     }
     coefficient = dict(item.metadata or {}).get("fq_coefficient")
     if coefficient is not None:
@@ -309,34 +279,5 @@ def _execution_provenance(result: Any) -> dict[str, Any]:
         "simulation_engine": str(result.runtime.get("simulation_engine", "")),
         "mode": str(result.runtime.get("mode", "")),
         "device": str(result.runtime.get("device", "")),
-        "accuracy": _plain(result.accuracy),
+        "accuracy": plain(result.accuracy),
     }
-
-
-def _plain(value: Any) -> Any:
-    """Convert SDK containers and dataclasses into JSON-native types.
-
-    Tensors arrive with a leading batch axis because the SDK carries a batch
-    dimension through every result. The axis is dropped when it is exactly one,
-    which loses nothing: a single-batch result is the same data without it.
-    """
-    if dataclasses.is_dataclass(value) and not isinstance(value, type):
-        return _plain(
-            {field.name: getattr(value, field.name) for field in dataclasses.fields(value)}
-        )
-    if isinstance(value, Mapping):
-        return {str(key): _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_plain(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    if hasattr(value, "tolist"):
-        return _plain(_without_batch_axis(value.tolist()))
-    return str(value)
-
-
-def _without_batch_axis(converted: Any) -> Any:
-    """Drop a leading axis of length one, which carries no information."""
-    if isinstance(converted, list) and len(converted) == 1 and isinstance(converted[0], list):
-        return converted[0]
-    return converted
