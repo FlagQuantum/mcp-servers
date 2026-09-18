@@ -300,6 +300,7 @@ Expected: FAIL — `test_an_all_identity_term_is_refused_by_its_position` report
 
 ```bash
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/planning.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/planning.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 If the suite passes with the validation removed, the extraction is decorative and the terms are being checked somewhere else — find out where before continuing.
@@ -581,6 +582,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_simulation.py -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/preconditions.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/preconditions.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on the observable-refusal test before the restore. If it passes, `simulation.py` is still refusing on its own and the move is incomplete.
@@ -749,6 +751,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_budget -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/limits.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/limits.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on the malformed-value test. A bound that reads `"0"` as zero would refuse every call for a deployment that meant "unlimited", which is the failure the fallback exists to prevent.
@@ -1301,6 +1304,7 @@ Restore, then the second mutation:
 ```bash
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 **Mutation 2 — drop the expression branch.**
@@ -1323,6 +1327,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on `test_a_parameter_inside_an_expression_is_substituted` and
@@ -1351,6 +1356,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected, and measured: **1 failed, 10 passed** — only the gradient test, while
@@ -1822,6 +1828,7 @@ term = hamiltonian_from_terms([{'pauli': 'IX'}], n_wires=2).terms[0]
 print('ops after the SDK normalized it:', term.ops)
 "
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 `_normalize_pauli` in the SDK filters identities out of its `ops` tuple, so the
@@ -2609,6 +2616,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on `test_the_hamiltonian_reaches_the_objective` — the run converges to `-1.0` instead of `-2.236`. If it passes, the policy is being set somewhere else and this tool is not the thing under test.
@@ -2631,6 +2639,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k final_loss -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on `test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before`.
@@ -3409,6 +3418,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_tool_wiring.py -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/server.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/server.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL on the `train_parameters_tool` case, because the starting values no longer reach the optimizer.
@@ -3516,6 +3526,7 @@ p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_dependencies -q
 python3 -c "import pathlib; pathlib.Path('tests/test_api_contract.py.mutbak').replace(pathlib.Path('tests/test_api_contract.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
 
 Expected: FAIL before the restore.
