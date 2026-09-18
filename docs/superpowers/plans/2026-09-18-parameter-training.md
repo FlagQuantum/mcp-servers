@@ -2135,6 +2135,14 @@ def test_a_run_inside_the_budget_is_not_refused(monkeypatch: pytest.MonkeyPatch)
 
 Add `ToolLimitError` to the test module's error import.
 
+`tests/test_training.py` already contains `test_a_learning_rate_adam_cannot_use_is_refused`
+and `test_a_non_finite_starting_value_is_refused`. **Do not re-add either.**
+Step 1 above does not list them, and they are here because a review of Task 7
+found that a non-finite learning rate or starting value returned a `success`
+envelope full of NaN — so they shipped with the validators they pin rather than a
+task later, which is where a test belongs. Two `def`s with one name in a module
+means pytest collects one and silently never runs the other.
+
 - [ ] **Step 2: Run them to verify they fail**
 
 Run: `../.venv/bin/pytest tests/test_training.py -k "trajectory or ham_ or reaches" -q`
@@ -2626,6 +2634,19 @@ git commit -m "feat: train a circuit's parameters against a Pauli-sum energy"
 
 Task 7 refuses what would break the run. This task refuses what would make it *succeed at the wrong thing*, which is the harder class.
 
+**Three refusal tests shipped early, with Task 7, and are already in
+`tests/test_training.py`:**
+`test_a_learning_rate_adam_cannot_use_is_refused` (with `nan` and `inf` in its
+parametrize list), `test_a_non_finite_starting_value_is_refused`, and the
+`_check_steps` cases. All three pin validators that live in Task 7, and the
+non-finite pair was found by review after Task 7 was already written — so they
+shipped with the code they pin rather than a task later, which is where a test
+belongs. **Do not re-add any of them here.** Two `def`s with one name in a module
+means pytest collects one and silently never runs the other. Check the file
+before appending: if a name below is already present, skip it and say so in your
+report.
+
+
 **Files:**
 - Modify: `flagquantum-mcp-server/src/flagquantum_mcp_server/training.py`
 - Test: `flagquantum-mcp-server/tests/test_training.py`
@@ -2678,22 +2699,6 @@ def test_an_empty_hamiltonian_is_refused() -> None:
     assert "'terms'" not in message
 
 
-def test_a_non_finite_starting_value_is_refused() -> None:
-    """NaN reaches the optimizer and comes back as a successful run of NaN.
-
-    Measured: without this refusal, ``values={"t0": nan}`` returns
-    ``status: "success"`` with every loss and every returned parameter NaN.
-    ``json.loads`` accepts the ``NaN`` and ``Infinity`` tokens, so a payload
-    carrying one is not rejected before it gets here.
-    """
-    from flagquantum_mcp_server.training import train_parameters
-
-    with pytest.raises(ToolInputError) as caught:
-        train_parameters(ANGLED, TFIM2, "qir", values={"t0": float("nan"), "t1": 0.1})
-
-    assert "t0" in str(caught.value)
-
-
 def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
     """The typo case: silently ignored, the parameter trains from zero."""
     from flagquantum_mcp_server.training import train_parameters
@@ -2732,16 +2737,6 @@ def test_a_step_count_the_loop_cannot_use_is_refused(steps: object) -> None:
         train_parameters(ANGLED, TFIM2, "qir", steps=steps)
 
     assert "steps" in str(caught.value)
-
-
-@pytest.mark.parametrize("rate", [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf")])
-def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
-    from flagquantum_mcp_server.training import train_parameters
-
-    with pytest.raises(ToolInputError) as caught:
-        train_parameters(ANGLED, TFIM2, "qir", learning_rate=rate)
-
-    assert "learning_rate" in str(caught.value)
 
 
 def test_a_circuit_carrying_observables_is_refused_and_points_at_hamiltonian() -> None:
@@ -2838,9 +2833,9 @@ Change `train_parameters` to call `_objective(hamiltonian, n_wires=int(ir.n_wire
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds nine tests; read the count off the output and
-check it rose by nine. (The figure once written here was 44 and was three high —
-it had been computed before earlier tasks' fix rounds added their own tests.)
+Expected: PASS. This step adds eight tests; read the count off the output and
+check it rose by eight. (Three of the refusals it would otherwise add are already
+in the file, shipped with Task 7 — see the note at the top of this task.)
 
 - [ ] **Step 5: Mutation-test each refusal**
 
