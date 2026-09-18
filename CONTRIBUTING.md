@@ -104,3 +104,32 @@ each other.
 
 Publishing, and changing a package's visibility, are outward-facing actions.
 Do not do either without explicit authorization.
+
+## Publishing a second server
+
+Three places enumerate the packages, and a new one must be added to all of
+them or it cannot be released at all:
+
+1. `.github/workflows/publish-pypi.yml` — `on.workflow_dispatch.inputs.package.options`
+2. `.github/workflows/publish-mcp-registry.yml` — the same field
+3. the server table in the repository `README.md`
+
+Both workflows run with `working-directory: ${{ inputs.package }}`, so a
+package that is not in the options list cannot be selected.
+
+The MCP Registry entry also needs, in the new package's README, the ownership
+marker the registry reads:
+
+```markdown
+<!-- mcp-name: io.github.<owner>/<server-name> -->
+```
+
+`tests/test_versions.py` in the first package shows all three checks — the
+marker, the 100-character description limit, and the transport allow-list.
+
+**Do not create a second GitHub repository for a second server.** PyPI trusted
+publishing lets a project trust one repository and one workflow filename, so a
+new repository means a new publisher configuration on PyPI, and a new
+repository also cannot own the `io.github.FlagQuantum` namespace the registry
+verifies. Adding a directory here is the cheap path; splitting is the expensive
+one.
