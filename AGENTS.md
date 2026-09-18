@@ -198,20 +198,21 @@ with zipfile.ZipFile(wheel) as z:
             if packaged[member] != (source / rel).read_bytes():
                 stale.append(member)
 
-# Both directions, and both halves of the second one. A wheel carrying a module
-# this tree no longer has is a stale build too; that is a module inside the
-# package (a rename, a deletion) AND a stray top-level module, which is a
-# packaging mistake rather than a stale build. Every .py outside the wheel's own
-# bookkeeping must correspond to a file in this tree, wherever it sits.
+# The other direction: a wheel carrying a .py this tree no longer has is a stale
+# build too -- a rename, a deletion -- and only this half sees it. The expected
+# set is built in the wheel's own member spelling and compared whole, so a
+# top-level module is matched as itself rather than stripped to a basename that
+# could collide with an in-package name. .dist-info/ is the wheel's own
+# bookkeeping, not a module.
+expected = {"flagquantum_mcp_server/" + rel for rel in here}
 extra = sorted(
-    n
-    for n in names
-    if n.endswith(".py")
-    and ".dist-info/" not in n
-    and n.removeprefix("flagquantum_mcp_server/") not in here
+    n for n in names if n.endswith(".py") and ".dist-info/" not in n and n not in expected
 )
 
-assert packaged, f"no modules compared: {source} holds no .py files"
+# No anti-vacuity assert here: `assert here` above guarantees the loop ran, and
+# an empty `packaged` can only mean every module was absent, which the next line
+# reports accurately. An assert that can only fire with the wrong message is
+# worse than none.
 assert not absent, f"{wheel} is missing {absent}"
 assert not stale, f"{wheel} was not built from this tree: {stale}"
 assert not extra, f"{wheel} carries modules this tree does not have: {extra}"
