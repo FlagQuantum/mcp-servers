@@ -965,9 +965,9 @@ def test_a_parameter_inside_an_expression_is_substituted() -> None:
     built = replay_builder(ir)({"t0": torch.tensor([0.3]), "t1": torch.tensor([0.4])})
 
     assert built.is_parameterized() is False, "the rebuild still carries symbols"
-    assert _numeric(
-        built.to_ir().to_dict()["instructions"][1]["params"]["theta"]
-    ) == pytest.approx(0.8)
+    assert _numeric(built.to_ir().to_dict()["instructions"][1]["params"]["theta"]) == pytest.approx(
+        0.8
+    )
 
 
 def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
@@ -1011,9 +1011,7 @@ def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
 
     groups = module.named_parameter_groups
     assert float(loss.detach()) == pytest.approx(math.sin(0.8) * math.sin(0.6), abs=1e-6)
-    assert float(groups["t1"].grad) == pytest.approx(
-        2 * math.sin(0.8) * math.cos(0.6), abs=1e-5
-    )
+    assert float(groups["t1"].grad) == pytest.approx(2 * math.sin(0.8) * math.cos(0.6), abs=1e-5)
 
 
 # --- the names come from the SDK ---
@@ -1124,6 +1122,7 @@ from typing import Any
 
 from flagquantum_mcp_server._bridge import load_sdk
 from flagquantum_mcp_server.circuits import circuit_from_ir
+
 
 def parameter_names(ir: Any) -> tuple[str, ...]:
     """Return the circuit's parameter names, in the SDK's order.
@@ -1919,8 +1918,11 @@ Append to `flagquantum-mcp-server/tests/test_training.py`:
 # --- the run ---
 
 # -Z0Z1 + X0 + X1, whose ground energy is -2.2360679... (=-sqrt(5)).
-TFIM2 = [{"pauli": "ZZ", "coefficient": -1.0}, {"pauli": "XI", "coefficient": 1.0},
-         {"pauli": "IX", "coefficient": 1.0}]
+TFIM2 = [
+    {"pauli": "ZZ", "coefficient": -1.0},
+    {"pauli": "XI", "coefficient": 1.0},
+    {"pauli": "IX", "coefficient": 1.0},
+]
 
 
 def test_training_returns_a_trajectory_and_the_parameters_it_ended_on() -> None:
@@ -1946,7 +1948,7 @@ def test_the_hamiltonian_reaches_the_objective() -> None:
 
     payload = train_parameters(ANGLED, TFIM2, "qir", steps=200, learning_rate=0.2)
 
-    assert payload["final_loss"] == pytest.approx(-5 ** 0.5, abs=0.05)
+    assert payload["final_loss"] == pytest.approx(-(5**0.5), abs=0.05)
 
 
 def test_the_objective_is_the_hamiltonian_and_not_the_first_wire_s_z() -> None:
@@ -1983,9 +1985,7 @@ def test_the_reported_parameters_are_what_the_next_call_starts_from() -> None:
     from flagquantum_mcp_server.training import train_parameters
 
     payload = train_parameters(ANGLED, TFIM2, "qir", steps=3, learning_rate=0.3)
-    again = train_parameters(
-        ANGLED, TFIM2, "qir", values=payload["parameters"], steps=1
-    )
+    again = train_parameters(ANGLED, TFIM2, "qir", values=payload["parameters"], steps=1)
 
     assert again["initial_parameters"] == pytest.approx(payload["parameters"])
 
@@ -2304,14 +2304,12 @@ def _check_names(names: tuple[str, ...]) -> None:
     raise ToolInputError(
         "This circuit has no parameters, so there is nothing to train: every "
         "step would evaluate the same circuit and report the same loss. Write "
-        "an angle as a symbol — {\"theta\": {\"$parameter\": \"theta\"}} — or "
+        'an angle as a symbol — {"theta": {"$parameter": "theta"}} — or '
         "call inspect_parameters_tool to confirm."
     )
 
 
-def _resolve_values(
-    names: tuple[str, ...], values: Mapping[str, float] | None
-) -> dict[str, float]:
+def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) -> dict[str, float]:
     """Resolve the caller's starting point, refusing anything ambiguous.
 
     Both directions are refused. An unknown name is a typo that would otherwise
@@ -2354,8 +2352,7 @@ def _resolve_values(
         value = values[name]
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ToolInputError(
-                f"values[{name!r}] is {value!r}; every starting value must be a "
-                "real number."
+                f"values[{name!r}] is {value!r}; every starting value must be a real number."
             )
         resolved[name] = float(value)
     return resolved
@@ -2593,9 +2590,7 @@ def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
     from flagquantum_mcp_server.training import train_parameters
 
     with pytest.raises(ToolInputError) as caught:
-        train_parameters(
-            ANGLED, TFIM2, "qir", values={"t0": 0.1, "t1": 0.1, "t2": 0.1}
-        )
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": 0.1, "t1": 0.1, "t2": 0.1})
 
     message = str(caught.value)
     assert "t2" in message
@@ -2899,9 +2894,7 @@ def _trained(payload: dict[str, Any]) -> None:
     assert payload["initial_parameters"] == {"t0": 0.25, "t1": -0.25}, (
         "values must reach the optimizer"
     )
-    assert payload["final_loss"] < payload["initial_loss"], (
-        "learning_rate must reach the optimizer"
-    )
+    assert payload["final_loss"] < payload["initial_loss"], "learning_rate must reach the optimizer"
 ```
 
 Add a case to `CASES`, using a two-qubit parameterized gate list and a two-term objective:
@@ -3043,9 +3036,7 @@ TIER3_TRAINING = (
 
 
 @pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)
-def test_training_dependencies_are_still_declared_public(
-    module_path: str, attribute: str
-) -> None:
+def test_training_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
     module = importlib.import_module(module_path)
 
     assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
