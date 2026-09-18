@@ -361,3 +361,119 @@ def test_an_ir_payload_without_metadata_is_legal_but_hashes_differently(
     without_metadata = analyze(json.dumps(trimmed), "ir")["circuit"]["content_hash"]
 
     assert with_metadata != without_metadata
+
+
+# --- a tool that says what another tool will do is making a claim ---
+#
+# ``inspect_parameters_tool``'s note tells a caller what to do next, so it is a
+# claim about the other fourteen tools, and nothing held it to one. It read "A
+# parameterized circuit cannot be planned or exported as-is". Export does
+# refuse. Planning does not: a plan comes from the payload's shape and dtype and
+# never reads a parameter value. An agent session believed the note, bound eight
+# invented numbers before planning, and then reported a resource table computed
+# from values it had made up. The note was right about half of what it said,
+# which is the hardest kind of wrong to notice — every clause is plausible, and
+# a caller has no way to check one without doing the work the note just told it
+# to skip.
+#
+# So the tools are exercised here and the note is read. The parametrized cases
+# pin which tools refuse; the last test pins that the note says so.
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "expected"),
+    [
+        ("analyze_circuit_tool", {}, "success"),
+        ("describe_layers_tool", {}, "success"),
+        ("draw_circuit_tool", {}, "success"),
+        ("optimize_circuit_tool", {}, "success"),
+        ("plan_execution_tool", {}, "success"),
+        ("route_circuit_tool", {"topology": "line"}, "success"),
+        ("serialize_circuit_tool", {}, "success"),
+        ("emit_openqasm_tool", {}, "error"),
+        ("emit_qcis_tool", {}, "error"),
+    ],
+)
+async def test_only_the_emitters_refuse_an_unbound_circuit(
+    angled_qir: str, tool: str, arguments: dict[str, object], expected: str
+) -> None:
+    result = await mcp.call_tool(
+        tool, {"circuit": angled_qir, "circuit_format": "qir", **arguments}
+    )
+    payload = json.loads(result.content[0].text)
+
+    assert payload["status"] == expected, f"{tool} on an unbound circuit returned {payload}"
+
+
+async def test_the_refusal_names_the_fix(angled_qir: str) -> None:
+    """A refusal that does not name the way out is a refusal a caller has to guess at."""
+    result = await mcp.call_tool(
+        "emit_openqasm_tool", {"circuit": angled_qir, "circuit_format": "qir"}
+    )
+    payload = json.loads(result.content[0].text)
+
+    assert payload["error"]["code"] == "UNSUPPORTED_FORMAT"
+    assert "bind_parameters" in payload["error"]["message"]
+
+
+async def test_the_parameter_claims_agree_with_what_the_tools_do(angled_qir: str) -> None:
+    """Two published places tell a caller to bind, and both overstated it.
+
+    A text assertion on purpose: the behaviour is pinned above, and no
+    behavioural test can catch prose that contradicts it. "planned" is the
+    discriminator — it appears only in the claim that planning is blocked, and
+    never in the corrected wording, which names planning among the steps that
+    accept an unbound circuit.
+    """
+    from flagquantum_mcp_server.parameters import inspect_parameters
+
+    note = inspect_parameters(angled_qir, "qir")["note"].lower()
+    published = ((await mcp.get_tool("bind_parameters_tool")).description or "").lower()
+
+    for text, where in ((note, "the note"), (published, "bind_parameters_tool's summary")):
+        assert "export" in text, f"{where} has to name export as the blocked step"
+        assert "planned" not in text, f"{where} claims an unbound circuit cannot be planned"
+
+
+# --- the shape of an observable, which used to exist only inside a rejection ---
+
+
+async def test_the_documented_observable_example_is_what_the_sdk_stores(bell_qir: str) -> None:
+    """The entry shape was reachable only by being wrong first.
+
+    README showed ``"observables": []`` and this resource showed the same empty
+    list, so the form of an entry lived only in the message a caller got after
+    getting it wrong. An agent session building a VQE ansatz reported that it
+    left the field empty because it could not tell how to fill it — which drops
+    the Hamiltonian out of the one circuit that exists to carry it.
+    """
+    from flagquantum_mcp_server.circuits import serialize
+
+    result = await mcp.read_resource("flagquantum://ir-schema")
+    example = json.loads(result.contents[0].content)["observable_example"]
+
+    envelope = json.loads(serialize(bell_qir, "qir")["ir_json"])
+    envelope.update(example["sent"])
+    stored = json.loads(serialize(json.dumps(envelope), "ir")["ir_json"])
+
+    assert {key: stored[key] for key in example["sent"]} == example["canonical"]
+
+
+async def test_a_hamiltonian_weight_can_be_a_symbol(bell_qir: str) -> None:
+    """The resource states this; here is the claim being held to it."""
+    from flagquantum_mcp_server.circuits import serialize
+
+    envelope = json.loads(serialize(bell_qir, "qir")["ir_json"])
+    envelope["observables"] = [{"name": "zz", "wires": [0, 1], "coefficient": {"$parameter": "w"}}]
+    stored = json.loads(serialize(json.dumps(envelope), "ir")["ir_json"])
+
+    assert stored["observables"][0]["coefficient"] == {"$parameter": "w"}
+
+
+async def test_the_resource_documents_both_node_lists() -> None:
+    result = await mcp.read_resource("flagquantum://ir-schema")
+    notes = " ".join(json.loads(result.contents[0].content)["notes"])
+
+    assert "'coefficient'" in notes
+    assert "'shots'" in notes
+    assert "lowercased" in notes

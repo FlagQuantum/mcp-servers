@@ -186,6 +186,13 @@ FlagQuantum's `Parameter` defines no `__str__`, so `str()` falls through to
 `__repr__`. The symbol is intact — only the diagram's spelling is clumsy — and
 it affects both input formats equally.
 
+Binding is needed to **export**: the emitters write numbers, and refuse an
+unbound circuit naming `bind_parameters`. Nothing else needs it. `analyze`,
+`optimize`, `route`, `draw`, `describe_layers` and `plan_execution_tool` all
+accept a parameterized circuit as it stands, because none of them reads a
+parameter value — a plan is built from the payload's shape and dtype. Bind when
+you want the emitted text or a concrete circuit to run, not before.
+
 ### On an explicit unitary
 
 A gate's matrix travels under a key that **differs by format**: the gate list
@@ -232,6 +239,28 @@ and `n_wires: true` silently becomes 1.
 `dtype` is checked for being a *string* here. Which strings are legal stays with
 the SDK, whose own message names the rule (`complex_dtype must be complex64 or
 complex128`), so the two cannot drift apart.
+
+### On observables and measurements
+
+Both are lists of objects, empty when the circuit has none, and an entry is
+short — the SDK fills in the rest on load:
+
+```json
+{
+  "observables": [{"name": "ZZ", "wires": [0, 1]}],
+  "measurements": [{"kind": "counts", "wires": [0, 1], "shots": 1024}]
+}
+```
+
+What the SDK stores adds the optional keys and lowercases the observable name,
+so `"ZZ"` comes back as `"zz"` carrying `"coefficient": 1.0`. `coefficient` is
+the term's weight, and it may be a symbol exactly as a gate angle may
+(`{"$parameter": "w"}`), which is how a Hamiltonian term carries a variational
+weight. `shots` is null when omitted.
+
+An observable is what a VQE ansatz exists to measure, so it is worth knowing
+that the shape is reachable without being wrong first — `flagquantum://ir-schema`
+publishes both forms side by side as `observable_example`.
 
 ### On emitted text
 

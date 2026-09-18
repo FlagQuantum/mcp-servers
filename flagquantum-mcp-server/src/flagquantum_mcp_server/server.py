@@ -445,8 +445,10 @@ def bind_parameters_tool(
 ) -> dict[str, Any]:
     """Substitute values for a circuit's parameters.
 
-    The result is no longer parameterized, so it can be planned or exported,
-    unlike the circuit that went in.
+    The result is no longer parameterized, so it can be exported. Export is the
+    only step that needed this: analysis, optimization, routing, drawing and
+    plan_execution_tool all accept a parameterized circuit as-is, because none
+    of them reads a parameter value.
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
@@ -461,7 +463,7 @@ def bind_parameters_tool(
 
     Returns:
         The bound circuit as canonical IR, with its analysis and content hash.
-        The result is no longer parameterized and can be planned or exported.
+        The result is no longer parameterized.
     """
     return bind_parameters(circuit, values, circuit_format)
 
@@ -599,6 +601,32 @@ def gate_set_resource() -> dict[str, Any]:
     return payload
 
 
+def _observable_example(ir: Any) -> dict[str, Any]:
+    """The shortest observable and measurement a caller can send, and what the SDK stores.
+
+    Both fields were documented by an empty list and nothing else: the entry
+    shape appeared only inside a rejection message, so a caller had to be wrong
+    before it could learn the right form. An agent session building a VQE ansatz
+    left both empty and reported why — which drops the Hamiltonian out of the
+    one circuit that exists to carry it.
+
+    The short form is written here and round-tripped through the SDK's own
+    decoder and encoder, so what gets published is the canonical form rather
+    than this module's guess at it. The decoder fills in the optional keys and
+    lowercases the observable name; publishing both forms shows that, for the
+    same reason the rest of this resource shows a payload rather than describing
+    one.
+    """
+    payload = ir.to_dict()
+    sent = {
+        "observables": [{"name": "ZZ", "wires": [0, 1]}],
+        "measurements": [{"kind": "counts", "wires": [0, 1], "shots": 1024}],
+    }
+    payload.update(sent)
+    canonical = load_sdk().CircuitIR.from_dict(payload).to_dict()
+    return {"sent": sent, "canonical": {key: canonical[key] for key in sent}}
+
+
 @mcp.resource("flagquantum://ir-schema", mime_type="application/json")
 def ir_schema_resource() -> dict[str, Any]:
     """The circuit IR envelope, shown by example from a real serialization."""
@@ -610,6 +638,7 @@ def ir_schema_resource() -> dict[str, Any]:
         "ir_version": str(sdk.IR_VERSION),
         "example": sample.to_dict(),
         "parameter_example": parametric.to_dict(),
+        "observable_example": _observable_example(sample),
         "canonical_json": str(sample.to_json()),
         "content_hash": str(sample.content_hash),
         "notes": [
@@ -625,6 +654,21 @@ def ir_schema_resource() -> dict[str, Any]:
                 "The other encodings a parameter may carry are $expression, "
                 "$complex and $tensor; a mapping carrying none of those four keys "
                 "is rejected for the same reason."
+            ),
+            (
+                "'observables' and 'measurements' are always lists of objects, "
+                "empty when the circuit has none — a bare string or a single "
+                "object is rejected. See observable_example: the short form is "
+                "enough, and the SDK fills in the rest on load. An observable "
+                "is {'name': ..., 'wires': [...]} with an optional "
+                "'coefficient'; its name is lowercased, so 'ZZ' is stored as "
+                "'zz'. A measurement is {'kind': ..., 'wires': [...]} with an "
+                "optional 'shots' count."
+            ),
+            (
+                "An observable's 'coefficient' may be a symbol written "
+                '{"$parameter": "<name>"}, so a Hamiltonian term carries a '
+                "variational weight the same way a gate angle does."
             ),
             (
                 "Every payload also carries 'dtype' and 'shape'. The SDK writes "

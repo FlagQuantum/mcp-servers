@@ -53,8 +53,10 @@ def inspect_parameters(
         "occurrences": _occurrences(ir, names),
         "circuit": summarize_ir(ir)["circuit"],
         "note": (
-            "Bind with bind_parameters_tool to obtain a concrete circuit. "
-            "A parameterized circuit cannot be planned or exported as-is."
+            "Export is the only step that refuses an unbound circuit: the "
+            "emitters need numbers, so bind with bind_parameters_tool first. "
+            "Planning, analysis, optimization, routing and drawing all accept "
+            "it as-is, because none of them reads a parameter value."
         ),
     }
 
