@@ -146,17 +146,20 @@ def predict_seconds(ir: Any, steps: int) -> float:
     A single coefficient cannot follow the true curve either, which falls from
     1.0e-5 per instruction-state at four qubits to 2.1e-8 at twenty and rises
     again to 5.7e-8 at twenty-four as the state stops fitting where it used to.
-    ``GATE_COST`` clears the highest point rather than the average one.
+    The first two are measured points in the sixteen-row calibration table; the
+    third is the design document's own 24-wire, 71-instruction measurement,
+    68.5 s per step, and is not one of the sixteen. ``GATE_COST`` clears the
+    highest point rather than the average one.
 
     Where that leaves the margin, over the sixteen points it was calibrated at:
-    11x at four qubits and 4.9x at eight, where the floor is doing all the work;
-    between 2.0x and 8.4x everywhere else, thinnest at twenty-four wires with
-    four instructions and thickest at sixteen wires with four layers. The
-    thinnest matters least, because the budget admits almost nothing there: the
-    state term alone is 25.2 s per step at twenty-four wires, so no circuit at
-    that width gets more than two steps, and the full ansatz there, 119.1 s per
-    step, gets none at all. Twenty-two wires costs 6.3 s per step, and a
-    one-gate circuit at that width gets nine.
+    11x at four qubits, 4.9x at eight and 2.2x at twelve, the three widths where
+    the floor is doing all the work; between 1.9x and 8.4x at the other thirteen,
+    thinnest at twenty-four wires with four instructions and thickest at sixteen
+    wires with four layers. The thinnest matters least, because the budget admits
+    almost nothing there: the state term alone is 25.2 s per step at twenty-four
+    wires, so no circuit at that width gets more than two steps, and the full
+    ansatz there, 119.1 s per step, gets none at all. Twenty-two wires costs
+    6.3 s per step, and a one-gate circuit at that width gets nine.
 
     Args:
         ir: A validated ``CircuitIR``.
