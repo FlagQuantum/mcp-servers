@@ -3591,34 +3591,49 @@ Assert on the contents instead of the name:
 
 ```bash
 python3 - <<'PY'
-import glob, pathlib, sys, zipfile
+import glob
+import pathlib
+import zipfile
+
+# The directory check comes first: run from the wrong place, every other
+# assertion here passes on empty sets and reports a match that compared nothing.
+source = pathlib.Path("src/flagquantum_mcp_server")
+assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
 
 wheels = sorted(glob.glob("dist/*.whl"))
 assert wheels, "no wheel in dist/: run `../.venv/bin/python -m build` first"
 assert len(wheels) == 1, f"more than one wheel in dist/: {wheels}"
 wheel = pathlib.Path(wheels[0])
-source = pathlib.Path("src/flagquantum_mcp_server")
-assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
+
+here = {str(f.relative_to(source)) for f in source.rglob("*.py")}
+assert here, f"no .py files under {source}"
 
 with zipfile.ZipFile(wheel) as z:
     names = set(z.namelist())
     packaged, stale, absent = {}, [], []
-    for f in sorted(source.rglob("*.py")):
-        rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
-        if rel not in names:
-            absent.append(rel)
+    for rel in sorted(here):
+        member = "flagquantum_mcp_server/" + rel
+        if member not in names:
+            absent.append(member)
         else:
-            packaged[rel] = z.read(rel)
-            if packaged[rel] != f.read_bytes():
-                stale.append(rel)
+            packaged[member] = z.read(member)
+            if packaged[member] != (source / rel).read_bytes():
+                stale.append(member)
+
+# Both directions, and both halves of the second one. A wheel carrying a module
+# this tree no longer has is a stale build too; that is a module inside the
+# package (a rename, a deletion) AND a stray top-level module, which is a
+# packaging mistake rather than a stale build. Every .py outside the wheel's own
+# bookkeeping must correspond to a file in this tree, wherever it sits.
+extra = sorted(
+    n
+    for n in names
+    if n.endswith(".py")
+    and ".dist-info/" not in n
+    and n.removeprefix("flagquantum_mcp_server/") not in here
+)
 
 assert packaged, f"no modules compared: {source} holds no .py files"
-extra = sorted(
-    n for n in names
-    if n.startswith("flagquantum_mcp_server/") and n.endswith(".py")
-    and n.removeprefix("flagquantum_mcp_server/") not in
-    {str(f.relative_to(source)) for f in source.rglob("*.py")}
-)
 assert not absent, f"{wheel} is missing {absent}"
 assert not stale, f"{wheel} was not built from this tree: {stale}"
 assert not extra, f"{wheel} carries modules this tree does not have: {extra}"
@@ -3755,7 +3770,7 @@ Second, a row in the execution table, after the `simulate_circuit_tool` row:
 
 Third, a section after "Measuring an energy":
 
-```markdown
+````markdown
 ### Lowering an energy
 
 `simulate_circuit_tool` evaluates an energy. `train_parameters_tool` improves
@@ -3796,7 +3811,7 @@ And the result is what it is: a loss curve and a set of angles. Whether the run
 converged is your reading, not this tool's claim, and the SDK's
 `accuracy.metric == "not_measured"` travels with the execution exactly as it
 does for a simulation.
-```
+````
 
 Fourth, two table rows. In the limits table:
 
@@ -3912,34 +3927,49 @@ WHEELCHECK="$(mktemp -d)"
 python3 -m venv "$WHEELCHECK"
 "$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python3 - <<'PY'
-import glob, pathlib, sys, zipfile
+import glob
+import pathlib
+import zipfile
+
+# The directory check comes first: run from the wrong place, every other
+# assertion here passes on empty sets and reports a match that compared nothing.
+source = pathlib.Path("src/flagquantum_mcp_server")
+assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
 
 wheels = sorted(glob.glob("dist/*.whl"))
 assert wheels, "no wheel in dist/: run `../.venv/bin/python -m build` first"
 assert len(wheels) == 1, f"more than one wheel in dist/: {wheels}"
 wheel = pathlib.Path(wheels[0])
-source = pathlib.Path("src/flagquantum_mcp_server")
-assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
+
+here = {str(f.relative_to(source)) for f in source.rglob("*.py")}
+assert here, f"no .py files under {source}"
 
 with zipfile.ZipFile(wheel) as z:
     names = set(z.namelist())
     packaged, stale, absent = {}, [], []
-    for f in sorted(source.rglob("*.py")):
-        rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
-        if rel not in names:
-            absent.append(rel)
+    for rel in sorted(here):
+        member = "flagquantum_mcp_server/" + rel
+        if member not in names:
+            absent.append(member)
         else:
-            packaged[rel] = z.read(rel)
-            if packaged[rel] != f.read_bytes():
-                stale.append(rel)
+            packaged[member] = z.read(member)
+            if packaged[member] != (source / rel).read_bytes():
+                stale.append(member)
+
+# Both directions, and both halves of the second one. A wheel carrying a module
+# this tree no longer has is a stale build too; that is a module inside the
+# package (a rename, a deletion) AND a stray top-level module, which is a
+# packaging mistake rather than a stale build. Every .py outside the wheel's own
+# bookkeeping must correspond to a file in this tree, wherever it sits.
+extra = sorted(
+    n
+    for n in names
+    if n.endswith(".py")
+    and ".dist-info/" not in n
+    and n.removeprefix("flagquantum_mcp_server/") not in here
+)
 
 assert packaged, f"no modules compared: {source} holds no .py files"
-extra = sorted(
-    n for n in names
-    if n.startswith("flagquantum_mcp_server/") and n.endswith(".py")
-    and n.removeprefix("flagquantum_mcp_server/") not in
-    {str(f.relative_to(source)) for f in source.rglob("*.py")}
-)
 assert not absent, f"{wheel} is missing {absent}"
 assert not stale, f"{wheel} was not built from this tree: {stale}"
 assert not extra, f"{wheel} carries modules this tree does not have: {extra}"
