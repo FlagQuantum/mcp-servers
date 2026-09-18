@@ -895,9 +895,6 @@ def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
     in which the SDK's word and a caller's literal are the same six characters,
     and an unanchored replace answers ``('hamiltonian')`` — the caller's own
     value rewritten, in the message whose job is to explain it. Measured.
-
-    A literal containing ``terms[`` is still echoed renamed; that is the residual
-    this test records rather than claims away.
     """
     from flagquantum_mcp_server.training import train_parameters
 
@@ -910,26 +907,81 @@ def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
     assert "hamiltonian[0]" in message, message
 
 
-def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> None:
-    """The one input the rename still gets wrong, written down as a test.
+def test_a_literal_is_echoed_unchanged_in_every_position_it_can_occupy() -> None:
+    """A caller's value is never rewritten by a message about that value.
 
-    ``terms[`` is anchored to nothing: it is the SDK's noun inside
-    ``terms[0] has no 'pauli' string``, and it appears mid-message, so there is
-    no position to anchor it to. A caller whose own value is the literal string
-    ``terms[`` therefore has it echoed back as ``hamiltonian[`` — the same defect
-    the anchor fixed for the other shape, one step further out.
+    The SDK's nouns and a caller's literals meet in the same message: the
+    validator says ``terms[0] has no 'pauli' string`` and, for a caller who
+    passed the literal string ``terms[``, it says ``terms[0] 'pauli' 'terms['
+    covers 6 wires``. A blanket replace cannot tell those apart.
 
-    This asserts the defective behaviour on purpose. It is here so the residual
-    is a fact in the suite rather than a sentence in a docstring, and so that
-    anyone who fixes it gets a red test telling them what changed. Measured
-    wording; if the rename is ever rebuilt to take the noun as a parameter
-    instead of substituting text, this test is what should be deleted.
+    Measured across all three positions a literal can occupy — the pauli string,
+    the coefficient, and a term's key — after the three anchored patterns:
+    every one now keeps the caller's text intact.
+
+    Each case carries the literal it sends *and* the form a blanket replace
+    would have produced, because for the ``terms`` literal the caller's own
+    text is the SDK's word with quotes around it: ``'terms' not in message`` and
+    ``'terms' in message`` cannot both be the check. Measured, a single
+    ``not in`` pair for all six cases reds against correct code in every case —
+    the caller's quoted value contains the substring the assertion forbids. So
+    the two halves are stated per case, against the message each caller
+    actually sees.
+
+    This test replaced one that asserted the *defect* here. Both bracket and
+    field-name forms are anchored now, so the defect is gone and the tripwire
+    fired, which is what it was for. The one surviving residual is the phrase
+    form, and it has its own test below.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    cases = [
+        # (objective, the caller's literal, what a blanket replace would say)
+        ([{"pauli": "terms[", "coefficient": 1.0}], "terms[", "hamiltonian["),
+        ([{"pauli": "ZZ", "coefficient": "terms["}], "terms[", "hamiltonian["),
+        ([{"pauli": "ZZ", "coefficient": 1.0, "terms[": 1}], "terms[", "hamiltonian["),
+        ([{"pauli": "terms", "coefficient": 1.0}], "terms", "hamiltonian"),
+        ([{"pauli": "ZZ", "coefficient": "terms"}], "terms", "hamiltonian"),
+        ([{"pauli": "ZZ", "coefficient": 1.0, "terms": 1}], "terms", "hamiltonian"),
+    ]
+
+    for objective, literal, rewritten in cases:
+        with pytest.raises(ToolInputError) as caught:
+            train_parameters(ANGLED, objective, "qir", steps=1)
+        message = str(caught.value)
+        assert "hamiltonian" in message, (objective, message)
+        # The caller's own value is quoted back verbatim ...
+        assert f"'{literal}'" in message, (objective, message)
+        # ... in the same message whose SDK noun was renamed.
+        assert f"'{rewritten}'" not in message, (objective, message)
+
+
+def test_a_phrase_shaped_literal_is_the_one_recorded_residual() -> None:
+    """The single input the rename still gets wrong, written down as a test.
+
+    ``An expectation needs`` is the one pattern with no position to anchor on: it
+    sits mid-sentence inside ``'terms' is empty. An expectation needs at least
+    one term``, and a caller whose own value is that phrase therefore has it
+    echoed as ``An objective needs``.
+
+    This asserts the defective behaviour on purpose, so the residual is a fact in
+    the suite rather than a sentence in a docstring, and so anyone who fixes it
+    gets a red test telling them what changed. **This is the test to delete if
+    the rename is ever rebuilt to take the nouns as parameters** — which is the
+    real fix, and is exactly why it is not done here: it would change an
+    interface the ``expectation`` output path shares, to correct a message about
+    an input no caller will send.
     """
     from flagquantum_mcp_server.training import train_parameters
 
     with pytest.raises(ToolInputError) as caught:
-        train_parameters(ANGLED, [{"pauli": "terms[", "coefficient": 1.0}], "qir", steps=1)
+        train_parameters(
+            ANGLED,
+            [{"pauli": "ZZ", "coefficient": "An expectation needs a term"}],
+            "qir",
+            steps=1,
+        )
 
     message = str(caught.value)
-    assert "'hamiltonian['" in message, message
-    assert "terms[0]" not in message, message
+    assert "('An objective needs a term')" in message, message
+    assert "('An expectation needs a term')" not in message, message

@@ -207,23 +207,33 @@ def _in_this_tools_vocabulary(message: str) -> str:
     ``hamiltonian`` and an objective, so every one of those nouns names something
     they never typed. The refusals themselves are unchanged; only the nouns move.
 
-    **Every message this reaches was measured.** The validator raises eight
-    malformed-input refusals plus the bound's; they open with ``'terms' is ...``
-    (twice), ``terms[0] ...`` (five times), ``An expectation needs ...`` and
-    ``This expectation carries ...``. The four edits below cover all four
-    openings, and a test asserts the property over all eight shapes rather than
-    trusting the list.
+    **Every message this reaches was counted, not estimated.** Nine
+    malformed-input refusals plus the bound's. Two open with ``'terms' is``,
+    seven with ``terms[0]``, and the bound's with ``This expectation carries``;
+    a fourth phrase, ``An expectation needs``, sits mid-sentence inside the
+    second. An earlier version of this docstring said "eight ... (twice) ...
+    (five times)" and every one of those numbers was wrong.
 
-    **The field name is anchored to the start of the message, and that is not
-    cosmetic.** The validator quotes its own field name — ``'terms' is NoneType``
-    — and it also quotes the caller's offending value back at them: ``has a
-    coefficient that is a string ('terms')``. A caller who passes the literal
-    string ``terms`` produces a message containing *both*, and an unanchored
-    replace cannot tell them apart. Measured, the unanchored version answered
-    ``('hamiltonian')`` — the caller's own value rewritten, in the message whose
-    entire job is to tell them what was wrong with it. Anchoring removes that
-    case. A literal containing ``terms[`` is still echoed renamed; that residual
-    is pinned by a test rather than left to be discovered.
+    **Three of the four patterns are anchored to the start of the message, and
+    that is not cosmetic.** The validator quotes its own nouns — ``'terms' is
+    NoneType``, ``terms[0] has no 'pauli' string`` — and it also quotes the
+    caller's offending value back at them: ``has a coefficient that is a string
+    ('terms')``. A caller who passes the literal string ``terms`` produces a
+    message containing *both*, and an unanchored replace cannot tell them apart.
+    Measured, the unanchored version answered ``('hamiltonian')`` — the caller's
+    own value rewritten, in the message whose entire job is to explain it. All
+    three of the SDK's nouns are message prefixes, so all three can be anchored,
+    and after anchoring the caller's literal survives intact in every position it
+    can occupy.
+
+    **One phrase is left unanchored, and it is the residual.** ``An expectation
+    needs`` sits mid-sentence with no fixed position to key on, so a caller whose
+    own value is the literal string ``An expectation needs a term`` still has it
+    echoed as ``An objective needs a term``. It is pinned by a test that asserts
+    the defective behaviour on purpose. The alternative — teaching the shared
+    validator to take its nouns as parameters — would change an interface that
+    the ``expectation`` output path also uses, to fix a message about an input no
+    caller will send. Recorded, not fixed, with the reasoning in the test.
 
     The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
@@ -237,11 +247,12 @@ def _in_this_tools_vocabulary(message: str) -> str:
     """
     if message.startswith("'terms'"):
         message = "'hamiltonian'" + message[len("'terms'") :]
-    return (
-        message.replace("terms[", "hamiltonian[")
-        .replace("An expectation needs", "An objective needs")
-        .replace("This expectation carries", "This objective carries")
-    )
+    if message.startswith("terms["):
+        close = message.index("]")
+        message = "hamiltonian" + message[len("terms") : close + 1] + message[close + 1 :]
+    if message.startswith("This expectation carries"):
+        message = "This objective carries" + message[len("This expectation carries") :]
+    return message.replace("An expectation needs", "An objective needs")
 
 
 def load_algorithms() -> Any:
