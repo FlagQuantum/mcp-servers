@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Literal
 
 from flagquantum_mcp_server import limits
 from flagquantum_mcp_server._bridge import load_sdk
@@ -28,15 +28,22 @@ from flagquantum_mcp_server.errors import (
     UnsupportedFormatError,
 )
 
-IR_FORMAT = "ir"
-QIR_FORMAT = "qir"
-SUPPORTED_FORMATS: tuple[str, ...] = (IR_FORMAT, QIR_FORMAT)
+# The accepted input formats. Declared as a closed set rather than plain
+# ``str`` so that FastMCP turns it into a JSON-schema ``enum``: a model that
+# sees the enum does not try "openqasm", "IR" or "qasm3", while a model that
+# only sees ``string`` does. It also lets the runtime check below act as a
+# second line of defence for callers that bypass the MCP layer.
+CircuitFormat = Literal["ir", "qir"]
+
+IR_FORMAT: CircuitFormat = "ir"
+QIR_FORMAT: CircuitFormat = "qir"
+SUPPORTED_FORMATS: tuple[CircuitFormat, ...] = (IR_FORMAT, QIR_FORMAT)
 IR_KIND = "flagquantum.circuit_ir"
 
 CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 
 
-def resolve_ir(circuit: CircuitPayload, circuit_format: str = IR_FORMAT) -> Any:
+def resolve_ir(circuit: CircuitPayload, circuit_format: CircuitFormat = IR_FORMAT) -> Any:
     """Parse caller input and return a validated ``CircuitIR``.
 
     Args:
@@ -185,7 +192,10 @@ def circuit_from_ir(ir: Any) -> Any:
 
 
 def serialize(
-    circuit: CircuitPayload, circuit_format: str = QIR_FORMAT, *, indent: int | None = None
+    circuit: CircuitPayload,
+    circuit_format: CircuitFormat = QIR_FORMAT,
+    *,
+    indent: int | None = None,
 ) -> dict[str, Any]:
     """Canonicalize a circuit into FlagQuantum IR JSON.
 

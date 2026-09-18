@@ -10,6 +10,7 @@ import json
 
 import pytest
 from fastmcp import FastMCP
+from fastmcp.exceptions import ValidationError
 
 from flagquantum_mcp_server.server import mcp
 
@@ -75,12 +76,54 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
         assert "circuit_format" in properties, name
 
 
-async def test_circuit_format_is_documented_as_a_string() -> None:
+async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
+    """The schema must publish the enum, not just document it in prose.
+
+    A model reads the JSON schema, not this repository. When ``circuit_format``
+    was a plain ``str``, nothing in the schema said "openqasm" or "IR" was
+    wrong, so a wrong guess cost a round trip through the error envelope. The
+    enum makes the wrong guess impossible to express.
+    """
     tools = {tool.name: tool for tool in await mcp.list_tools()}
 
-    schema = tools["analyze_circuit_tool"].parameters
-    assert schema["properties"]["circuit_format"]["type"] == "string"
-    assert schema["properties"]["circuit"]["type"] == "string"
+    for name, tool in tools.items():
+        properties = (tool.parameters or {}).get("properties", {})
+        if "circuit_format" not in properties:
+            assert name == "deserialize_circuit_tool", name
+            continue
+        schema = properties["circuit_format"]
+        assert schema.get("enum") == ["ir", "qir"], (name, schema)
+        assert schema["type"] == "string", name
+        assert schema["default"] in {"ir", "qir"}, name
+
+
+async def test_the_circuit_argument_shows_both_formats_by_example() -> None:
+    """Every tool that takes a circuit must say what one looks like.
+
+    The failure this guards against is a model that knows Qiskit and reaches
+    for OpenQASM. The parameter description has to rule that out where the
+    model actually reads it.
+    """
+    for tool in await mcp.list_tools():
+        properties = (tool.parameters or {}).get("properties", {})
+        if "circuit" not in properties:
+            continue
+        description = properties["circuit"]["description"]
+        assert 'circuit_format="qir"' in description, tool.name
+        assert '"name": "h"' in description, tool.name
+        assert 'circuit_format="ir"' in description, tool.name
+        assert "OpenQASM" in description, tool.name
+
+
+async def test_an_invalid_format_is_rejected_before_the_tool_body_runs() -> None:
+    """Schema violations are a protocol error, not our envelope.
+
+    That is the intended split: the schema catches what it can describe, and
+    the envelope catches everything else. Both reach the client as an error it
+    can read; only the layer differs.
+    """
+    with pytest.raises(ValidationError, match="Input should be 'ir' or 'qir'"):
+        await mcp.call_tool("analyze_circuit_tool", {"circuit": "[]", "circuit_format": "openqasm"})
 
 
 async def test_every_resource_and_prompt_is_registered() -> None:
@@ -117,9 +160,16 @@ OVERSIZED = "[" + "1," * 400_000 + "1]"
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        ({"circuit": "[]", "circuit_format": "yaml"}, "UNSUPPORTED_FORMAT"),
         ({"circuit": "[]", "circuit_format": "ir"}, "INVALID_INPUT"),
         ({"circuit": OVERSIZED, "circuit_format": "qir"}, "LIMIT_EXCEEDED"),
+        (
+            {"circuit": '{"kind": "nope"}', "circuit_format": "ir"},
+            "INVALID_INPUT",
+        ),
+        (
+            {"circuit": '[{"name": "nope", "index": [0]}]', "circuit_format": "qir"},
+            "INVALID_INPUT",
+        ),
     ],
 )
 async def test_the_error_envelope_is_the_same_shape_for_every_code(

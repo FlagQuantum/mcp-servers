@@ -97,6 +97,12 @@ to write by hand:
 Either format can be passed to any tool; `serialize_circuit_tool` converts
 `qir` into canonical `ir`.
 
+`circuit_format` is a closed set — the JSON schema publishes
+`"enum": ["ir", "qir"]`, so a wrong value is rejected before any tool body runs.
+**OpenQASM text is not a supported input.** FlagQuantum ships emitters but no
+QASM parser, so there is nothing to convert it with; a caller holding OpenQASM
+has to load it into FlagQuantum itself and send the resulting IR.
+
 ## Limits
 
 Every bound is overridable by environment variable, so a deployment can tighten
@@ -112,7 +118,15 @@ them without a code change:
 
 ## Errors
 
-Tools do not raise across the MCP boundary. A failure comes back as:
+There are two layers, and which one answers depends on whether the schema could
+describe the mistake.
+
+**Schema violations** are caught by the MCP layer before any tool body runs and
+come back as a protocol error. That covers a `circuit_format` outside the enum,
+a missing required argument, and an argument of the wrong JSON type.
+
+**Everything else** comes back as a structured envelope, so a caller can branch
+on the code instead of parsing prose:
 
 ```json
 {"status": "error", "error": {"code": "LIMIT_EXCEEDED", "message": "..."}}
@@ -120,6 +134,11 @@ Tools do not raise across the MCP boundary. A failure comes back as:
 
 Codes: `INVALID_INPUT`, `LIMIT_EXCEEDED`, `UNSUPPORTED_FORMAT`,
 `SDK_UNAVAILABLE`, `INTERNAL_ERROR`.
+
+Both layers reach the client as an error it can read; only the layer differs.
+Nothing escapes as an unhandled exception that would break the transport — a
+failed call leaves the session usable for the next one, which
+`tests/test_server_process.py` asserts over a real stdio connection.
 
 ## What this server deliberately does not do
 

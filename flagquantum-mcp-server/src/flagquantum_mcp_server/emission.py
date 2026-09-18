@@ -14,7 +14,7 @@ from typing import Any
 
 from flagquantum_mcp_server import limits
 from flagquantum_mcp_server._bridge import load_attribute
-from flagquantum_mcp_server.circuits import CircuitPayload, resolve_ir
+from flagquantum_mcp_server.circuits import CircuitFormat, CircuitPayload, resolve_ir
 from flagquantum_mcp_server.errors import ToolLimitError, UnsupportedFormatError
 
 OPENQASM_MODULE = "flagquantum.compiler.openqasm"
@@ -27,7 +27,7 @@ SUPPORTED_QASM_VERSIONS: tuple[float, ...] = (2.0, 3.0)
 
 def emit_openqasm(
     circuit: CircuitPayload,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     *,
     version: float = 3.0,
     result_wires: list[int] | None = None,
@@ -59,7 +59,7 @@ def emit_openqasm(
     return _payload(text, "openqasm", f"{version:g}", ir)
 
 
-def emit_qcis(circuit: CircuitPayload, circuit_format: str = "ir") -> dict[str, Any]:
+def emit_qcis(circuit: CircuitPayload, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Render a circuit as QCIS text.
 
     Args:

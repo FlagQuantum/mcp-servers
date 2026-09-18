@@ -13,10 +13,10 @@ import dataclasses
 from typing import Any
 
 from flagquantum_mcp_server._bridge import load_sdk
-from flagquantum_mcp_server.circuits import CircuitPayload, resolve_ir
+from flagquantum_mcp_server.circuits import CircuitFormat, CircuitPayload, resolve_ir
 
 
-def analyze(circuit: CircuitPayload, circuit_format: str = "ir") -> dict[str, Any]:
+def analyze(circuit: CircuitPayload, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Describe a circuit's structure without executing it.
 
     Args:

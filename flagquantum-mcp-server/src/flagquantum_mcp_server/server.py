@@ -23,6 +23,7 @@ from flagquantum_mcp_server._bridge import FlagQuantumUnavailableError, load_sdk
 from flagquantum_mcp_server._version import __version__
 from flagquantum_mcp_server.analysis import analyze
 from flagquantum_mcp_server.circuits import (
+    CircuitFormat,
     deserialize,
     known_gate_names,
     serialize,
@@ -92,12 +93,11 @@ def _structured_errors(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[
 
 @mcp.tool(annotations=READ_ONLY)
 @_structured_errors
-def analyze_circuit_tool(circuit: str, circuit_format: str = "ir") -> dict[str, Any]:
+def analyze_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Report gate counts, depth and wire usage for one circuit.
 
     Args:
-        circuit: Circuit payload. IR JSON when circuit_format is "ir", or a
-            gate-list JSON array when it is "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -111,7 +111,7 @@ def analyze_circuit_tool(circuit: str, circuit_format: str = "ir") -> dict[str, 
 @mcp.tool(annotations=READ_ONLY)
 @_structured_errors
 def serialize_circuit_tool(
-    circuit: str, circuit_format: str = "qir", indent: int | None = None
+    circuit: str, circuit_format: CircuitFormat = "qir", indent: int | None = None
 ) -> dict[str, Any]:
     """Canonicalize a circuit into FlagQuantum IR JSON.
 
@@ -120,8 +120,8 @@ def serialize_circuit_tool(
     hash.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         indent: Optional indentation width for the returned JSON.
 
     Returns:
@@ -149,12 +149,12 @@ def deserialize_circuit_tool(ir_json: str, indent: int | None = None) -> dict[st
 
 @mcp.tool(annotations=READ_ONLY)
 @_structured_errors
-def optimize_circuit_tool(circuit: str, circuit_format: str = "ir") -> dict[str, Any]:
+def optimize_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Apply target-independent optimizations and report what changed.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
         The optimized IR, a before/after analysis, and instruction_delta.
@@ -166,7 +166,7 @@ def optimize_circuit_tool(circuit: str, circuit_format: str = "ir") -> dict[str,
 @_structured_errors
 def route_circuit_tool(
     circuit: str,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     topology: str = "line",
     rows: int | None = None,
     cols: int | None = None,
@@ -177,8 +177,8 @@ def route_circuit_tool(
     """Route a circuit onto a coupling map, inserting SWAPs where needed.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topology: "line", "ring", "grid" or "custom".
         rows: Grid rows; required when topology is "grid".
         cols: Grid columns; required when topology is "grid".
@@ -206,7 +206,7 @@ def route_circuit_tool(
 @_structured_errors
 def compare_topologies_tool(
     circuit: str,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     topologies: Sequence[str] | None = None,
     strategy: str = "restore_after_each_gate",
     optimize_first: bool = True,
@@ -214,8 +214,8 @@ def compare_topologies_tool(
     """Route one circuit onto several topologies and compare the cost.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topologies: Topology kinds to compare; defaults to line, ring and grid.
         strategy: "restore_after_each_gate" or "persistent_layout".
         optimize_first: Optimize before routing.
@@ -237,15 +237,15 @@ def compare_topologies_tool(
 @_structured_errors
 def emit_openqasm_tool(
     circuit: str,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     version: float = 3.0,
     result_wires: Sequence[int] | None = None,
 ) -> dict[str, Any]:
     """Render a circuit as OpenQASM 2.0 or 3.0 text.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         version: OpenQASM version, 2.0 or 3.0.
         result_wires: Wires to measure; omit to measure every wire.
 
@@ -263,12 +263,12 @@ def emit_openqasm_tool(
 
 @mcp.tool(annotations=READ_ONLY)
 @_structured_errors
-def emit_qcis_tool(circuit: str, circuit_format: str = "ir") -> dict[str, Any]:
+def emit_qcis_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Render a circuit as QCIS text.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
         The emitted QCIS program as text. A circuit containing an arbitrary
@@ -281,15 +281,15 @@ def emit_qcis_tool(circuit: str, circuit_format: str = "ir") -> dict[str, Any]:
 @_structured_errors
 def plan_execution_tool(
     circuit: str,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     options: Mapping[str, Any] | None = None,
     outputs: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Plan execution without running anything.
 
     Args:
-        circuit: Circuit payload, in either supported format.
-        circuit_format: Format of the input, "ir" or "qir".
+                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         options: Partial execution options. Supported keys: mode, backend,
             device, target, batch_size, precision, shots, seed,
             memory_limit_bytes, require_gradients, allow_approximate,

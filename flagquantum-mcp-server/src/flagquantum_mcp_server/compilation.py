@@ -15,7 +15,12 @@ from typing import Any
 from flagquantum_mcp_server import limits
 from flagquantum_mcp_server._bridge import load_attribute
 from flagquantum_mcp_server.analysis import summarize_ir
-from flagquantum_mcp_server.circuits import CircuitPayload, ir_to_json, resolve_ir
+from flagquantum_mcp_server.circuits import (
+    CircuitFormat,
+    CircuitPayload,
+    ir_to_json,
+    resolve_ir,
+)
 from flagquantum_mcp_server.errors import (
     ToolInputError,
     ToolLimitError,
@@ -32,7 +37,9 @@ TOPOLOGY_RENDERERS: tuple[str, ...] = ("line", "ring", "grid")
 EDGE_ARITY = 2
 
 
-def optimize_circuit(circuit: CircuitPayload, circuit_format: str = "ir") -> dict[str, Any]:
+def optimize_circuit(
+    circuit: CircuitPayload, circuit_format: CircuitFormat = "ir"
+) -> dict[str, Any]:
     """Apply target-independent optimizations and report what changed.
 
     Args:
@@ -60,7 +67,7 @@ def optimize_circuit(circuit: CircuitPayload, circuit_format: str = "ir") -> dic
 
 def route_circuit(
     circuit: CircuitPayload,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     *,
     topology: str = "line",
     rows: int | None = None,
@@ -113,7 +120,7 @@ def route_circuit(
 
 def compare_topologies(
     circuit: CircuitPayload,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     *,
     topologies: Sequence[str] | None = None,
     strategy: str = "restore_after_each_gate",

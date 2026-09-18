@@ -16,7 +16,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from flagquantum_mcp_server._bridge import load_sdk
-from flagquantum_mcp_server.circuits import CircuitPayload, resolve_ir
+from flagquantum_mcp_server.circuits import CircuitFormat, CircuitPayload, resolve_ir
 from flagquantum_mcp_server.errors import ToolInputError, UnsupportedFormatError
 
 OUTPUT_KINDS: tuple[str, ...] = ("counts", "expectation", "probabilities", "samples")
@@ -40,7 +40,7 @@ OPTION_FIELDS: tuple[str, ...] = (
 
 def plan_execution(
     circuit: CircuitPayload,
-    circuit_format: str = "ir",
+    circuit_format: CircuitFormat = "ir",
     *,
     options: Mapping[str, Any] | None = None,
     outputs: Sequence[Mapping[str, Any]] | None = None,
