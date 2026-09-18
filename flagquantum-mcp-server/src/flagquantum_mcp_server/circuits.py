@@ -27,6 +27,7 @@ from flagquantum_mcp_server.errors import (
     ToolLimitError,
     UnsupportedFormatError,
 )
+from flagquantum_mcp_server.gates import closest_names, known_opcodes, signature_or_none
 
 # The accepted input formats. Declared as a closed set rather than plain
 # ``str`` so that FastMCP turns it into a JSON-schema ``enum``: a model that
@@ -195,7 +196,90 @@ def _validate_gate(gate: Any, position: int) -> dict[str, Any]:
         wires.append(wire)
     if not wires:
         raise ToolInputError(f"{prefix} ({name!r}) has an empty index; name at least one wire.")
+    if "params" in gate and "parameters" not in gate:
+        raise ToolInputError(
+            f"{prefix} ({name!r}) uses the key 'params'. A qir gate carries its "
+            "arguments under 'parameters': "
+            '{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}.'
+        )
+    _check_known_name(name, gate, prefix)
+    _check_signature(name, wires, gate.get("parameters"), prefix)
     return {**gate, "index": wires}
+
+
+def _check_known_name(name: str, gate: Mapping[str, Any], prefix: str) -> None:
+    """Name a gate the SDK does not have, and suggest what was meant.
+
+    A custom opcode is legal — ``any`` carries a matrix under the ``gate`` key —
+    so an unknown name is only an error when the gate carries no matrix to
+    define it. The SDK's own message for this is terse and does not guess.
+    """
+    if signature_or_none(name) is not None:
+        return
+    if gate.get("gate") is not None or gate.get("matrix") is not None:
+        return
+    raise ToolInputError(
+        f"{prefix} ({name!r}) is not a gate in the installed FlagQuantum, and it "
+        "carries no matrix. Closest names: "
+        f"{closest_names(name)}. Call describe_gate_set_tool for the full list."
+    )
+
+
+def _check_signature(name: str, wires: list[int], params: Any, prefix: str) -> None:
+    """Check a gate against the SDK's own arity and parameter names.
+
+    A gate list is written by hand, so a wrong wire count or a misspelled
+    parameter is a normal mistake rather than an exotic one. The SDK reports
+    both as a bare wire-count complaint, which does not say what the gate
+    actually expects — and a misspelled parameter is worse, because it can be
+    accepted and then silently ignored.
+
+    Gates outside the built-in manifest (``any``, which carries a matrix) are
+    skipped rather than rejected.
+
+    Args:
+        name: The gate name as written, possibly an alias.
+        wires: The wires the caller gave.
+        params: The caller's ``params`` mapping, if any.
+        prefix: Position label used to name the offending gate.
+
+    Raises:
+        ToolInputError: If the wire count or a parameter name is wrong.
+    """
+    expected = signature_or_none(name)
+    if expected is None:
+        return
+    arity = int(expected["arity"])
+    if len(wires) != arity:
+        spelling = "" if expected["opcode"] == name else f" (alias of {expected['opcode']!r})"
+        raise ToolInputError(
+            f"{prefix} {name!r}{spelling} takes {arity} wire(s), but {len(wires)} "
+            f"were given. Wires for this gate: {wires}."
+        )
+    accepted = tuple(expected["parameters"])
+    if not isinstance(params, Mapping):
+        if params is not None:
+            raise ToolInputError(
+                f"{prefix} ({name!r}) has params {params!r}; expected an object "
+                "mapping parameter names to values."
+            )
+        params = {}
+    unknown = sorted(set(params) - set(accepted))
+    if unknown:
+        raise ToolInputError(
+            f"{prefix} ({name!r}) has unknown parameter(s) {unknown}. "
+            + (
+                f"This gate takes {list(accepted)}, in that order."
+                if accepted
+                else "This gate takes no parameters."
+            )
+        )
+    missing = sorted(set(accepted) - set(params))
+    if missing:
+        raise ToolInputError(
+            f"{prefix} ({name!r}) is missing parameter(s) {missing}. "
+            f"This gate takes {list(accepted)}, in that order."
+        )
 
 
 def enforce_limits(ir: Any) -> Any:
@@ -327,20 +411,13 @@ def deserialize(ir_json: str, *, indent: int | None = None) -> dict[str, Any]:
 
 
 def known_gate_names() -> list[str]:
-    """Return the gate vocabulary of the installed FlagQuantum.
+    """Return every gate name and alias the installed FlagQuantum accepts.
 
-    Derived at runtime rather than hard-coded, so the answer cannot drift from
-    the SDK it describes. The SDK installs every gate method twice — once
-    lowercase and once uppercase — so a name that exists in both cases is a
-    gate, while ``run``/``draw``/``analysis`` and friends exist only lowercase.
+    Taken from the SDK's operator manifest rather than inferred from its method
+    table, so aliases (``cx``/``cnot``, ``h``/``hadamard``) are included and the
+    list matches what a gate list may legally contain.
 
     Returns:
-        Sorted opcode names.
+        Sorted names.
     """
-    sdk = load_sdk()
-    attributes = set(dir(sdk.Circuit))
-    return sorted(
-        name
-        for name in attributes
-        if name.islower() and name.upper() in attributes and not name.startswith("_")
-    )
+    return sorted(known_opcodes())

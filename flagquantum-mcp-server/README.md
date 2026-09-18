@@ -17,22 +17,47 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Nine read-only tools over stdio:
+Fifteen read-only tools over stdio.
+
+**Build and inspect**
 
 | Tool | What it answers |
 | --- | --- |
+| `describe_gate_set_tool` | Wire count, parameter names and aliases for named gates — or every gate |
 | `analyze_circuit_tool` | Gate counts, depth, wire usage, two-qubit gate count |
+| `describe_layers_tool` | Which gates run concurrently, and therefore where the depth comes from |
 | `serialize_circuit_tool` | Canonical IR JSON plus its content hash |
 | `deserialize_circuit_tool` | Is this IR valid, and does it round-trip unchanged? |
+
+**Parameters**
+
+| Tool | What it answers |
+| --- | --- |
+| `inspect_parameters_tool` | Is this circuit parameterized, and where does each symbol sit? |
+| `bind_parameters_tool` | What does this ansatz look like once the symbols are numbers? |
+
+**Compile and route**
+
+| Tool | What it answers |
+| --- | --- |
 | `optimize_circuit_tool` | What did target-independent optimization change? |
 | `route_circuit_tool` | What does this circuit cost on a line / ring / grid / custom topology? |
 | `compare_topologies_tool` | Which connectivity is cheapest for this circuit? |
+| `describe_topology_tool` | What is the connectivity, and how far apart are two wires? |
+
+**Export and present**
+
+| Tool | What it answers |
+| --- | --- |
 | `emit_openqasm_tool` | OpenQASM 2.0 or 3.0 text |
 | `emit_qcis_tool` | QCIS text |
+| `draw_circuit_tool` | An ASCII diagram of the circuit |
 | `plan_execution_tool` | How would the SDK execute this — which mode, device, how much memory? |
 
-Three resources: `flagquantum://version`, `flagquantum://gate-set`,
-`flagquantum://ir-schema`.
+Three resources: `flagquantum://version` (versions of the server, the SDK and
+the IR contract), `flagquantum://gate-set` (every gate with its wire count and
+parameter names) and `flagquantum://ir-schema` (the IR envelope, shown by
+example from a real serialization).
 
 Three prompts: `build_and_analyze_circuit`, `compile_for_topology`,
 `export_circuit`.
@@ -174,20 +199,26 @@ failed call leaves the session usable for the next one, which
 ## Which contracts this rests on
 
 FlagQuantum publishes a frozen `stable_exports` snapshot (34 names, each with a
-named verification test) and separately describes `flagquantum.compiler` as its
-"stable expert compiler interface". This server uses both, in two tiers:
+named verification test), describes `flagquantum.compiler` as its "stable expert
+compiler interface", and lets each package declare its own `__all__`. This
+server uses all three tiers, and `tests/test_api_contract.py` pins the members
+of each:
 
-| Tier | Surface | Tools |
+| Tier | Surface | Used by |
 | --- | --- | --- |
-| Frozen snapshot | `Circuit`, `CircuitIR`, `Instruction`, `IR_VERSION`, `ExecutionOptions`, `ExecutionPlan`, `plan`, … | analyze, serialize, deserialize, plan |
-| Public module (`__all__`) | `flagquantum.compiler`: `CouplingMap`, `optimize`, `route_to_topology` | optimize, route, compare |
-| Public submodule (no `__all__`) | `flagquantum.compiler.openqasm.emit_openqasm`, `flagquantum.compiler.qcis.emit_qcis` | emit_openqasm, emit_qcis |
+| 1. Frozen snapshot | `Circuit`, `CircuitIR`, `Instruction`, `IR_VERSION`, `ExecutionOptions`, `ExecutionPlan`, `plan`, `Parameter`, … | analyze, serialize, deserialize, plan, inspect/bind parameters |
+| 2. Documented module | `flagquantum.compiler`: `CouplingMap`, `optimize`, `route_to_topology`, `schedule_layers` | optimize, route, compare, describe layers |
+| 3. Public but not frozen | `flagquantum.compiler.openqasm.emit_openqasm`, `flagquantum.compiler.qcis.emit_qcis`, `flagquantum.drawer.draw`, `flagquantum.core.{operator_manifest,gate_info,canonical_opcode}` | emit_openqasm, emit_qcis, draw, gate validation |
 
-The third tier is the weakest: those two functions are public but are not
-re-exported from `flagquantum.compiler`. They are resolved through a helper
-that turns a relocation into a named error rather than an `AttributeError`
-inside a tool call, and `tests/test_api_contract.py` pins both paths so a move
-fails the build instead of failing a user.
+**Tier 3 is the weakest, and it is not decoration.** Gate validation needs each
+gate's wire count and parameter names, and the SDK's operator manifest is the
+only authority for that — a caller cannot infer it from the circuit format, and
+reimplementing it here would create a second source of truth that drifts. The
+manifest is reached through a helper that turns a relocation into a named error
+rather than an `AttributeError` inside a tool call, and every tier-3 name is
+pinned by a test so a move upstream fails the build instead of failing a user.
+The failures that guard against are quiet ones: a weaker gate check accepts a
+misspelled parameter and drops it.
 
 The dependency is pinned to `flagquantum>=0.2,<0.3`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that

@@ -26,6 +26,12 @@ EXPECTED_TOOLS = {
     "emit_openqasm_tool",
     "emit_qcis_tool",
     "plan_execution_tool",
+    "describe_gate_set_tool",
+    "inspect_parameters_tool",
+    "bind_parameters_tool",
+    "describe_layers_tool",
+    "describe_topology_tool",
+    "draw_circuit_tool",
 }
 
 EXPECTED_RESOURCES = {
@@ -60,17 +66,28 @@ async def test_tools_are_declared_read_only_and_closed_world() -> None:
 
 
 async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
-    """Eight tools accept any input format; deserialize is the exception.
+    """Any tool that takes a circuit also takes its format.
 
-    ``deserialize_circuit_tool`` takes IR text only, because deciding *what* a
-    payload is would be exactly the ambiguity that tool exists to remove.
+    Three tools take no circuit, each for its own reason:
+    ``deserialize_circuit_tool`` takes IR text alone, because deciding *what* a
+    payload is would be the ambiguity that tool exists to remove;
+    ``describe_topology_tool`` describes a connectivity rather than a circuit;
+    ``describe_gate_set_tool`` describes gates.
     """
     tools = {tool.name: tool for tool in await mcp.list_tools()}
+    circuitless = {
+        "deserialize_circuit_tool",
+        "describe_topology_tool",
+        "describe_gate_set_tool",
+    }
 
     for name, tool in tools.items():
         properties = (tool.parameters or {}).get("properties", {})
         if name == "deserialize_circuit_tool":
             assert set(properties) == {"ir_json", "indent"}
+            continue
+        if name in circuitless:
+            assert "circuit" not in properties, name
             continue
         assert "circuit" in properties, name
         assert "circuit_format" in properties, name
@@ -89,7 +106,11 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
     for name, tool in tools.items():
         properties = (tool.parameters or {}).get("properties", {})
         if "circuit_format" not in properties:
-            assert name == "deserialize_circuit_tool", name
+            assert name in {
+                "deserialize_circuit_tool",
+                "describe_topology_tool",
+                "describe_gate_set_tool",
+            }, name
             continue
         schema = properties["circuit_format"]
         assert schema.get("enum") == ["ir", "qir"], (name, schema)
@@ -196,8 +217,13 @@ async def test_gate_set_resource_matches_the_sdk() -> None:
     result = await mcp.read_resource("flagquantum://gate-set")
     payload = json.loads(result.contents[0].content)
 
-    assert payload["n_gates"] == 45
-    assert payload["gates"] == sorted(payload["gates"])
+    # 35 opcodes, reachable under 45 names once aliases are counted.
+    assert payload["n_gates"] == 35
+    assert payload["n_names"] == 45
+    opcodes = [record["opcode"] for record in payload["gates"]]
+    assert opcodes == sorted(opcodes)
+    assert {"h", "cx", "rz", "ccx", "swap"} <= set(opcodes)
+    assert all("arity" in record and "parameters" in record for record in payload["gates"])
 
 
 async def test_version_resource_reports_the_installed_sdk() -> None:

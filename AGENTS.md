@@ -29,11 +29,25 @@ has configured a Qiskit MCP server already knows how to configure ours.
    tool needs behaviour FlagQuantum does not expose, the correct response is a
    public-API change in FlagQuantum, not a reimplementation here.
 
-3. **Depend only on the stable public API.** The allowed surface is the set of
-   names in FlagQuantum's `docs/public_api_v1.json` (`stable_exports`), plus
-   what a stable export returns. Internal modules (`flagquantum.core.*`,
-   `flagquantum.runtime.*` internals, planner internals) are off limits. A
-   private import in this repository is a bug even if it currently works.
+3. **Depend only on the public API, and record which tier you are using.**
+   Three tiers are allowed, and a test in `tests/test_api_contract.py` pins the
+   members of each:
+
+   | Tier | Surface | Strength |
+   | --- | --- | --- |
+   | 1 | The frozen `stable_exports` snapshot | Strongest; each name has a verification test upstream |
+   | 2 | `flagquantum.compiler` (documented `__all__`, not in the snapshot) | Public, but not frozen |
+   | 3 | Public names a package declares in its own `__all__` (`flagquantum.core`, `flagquantum.drawer`) and the two emitters | Weakest; must be pinned by a test here |
+
+   Anything else — planner internals, executor internals, anything reachable
+   only by a private path — is off limits. A private import in this repository
+   is a bug even if it currently works.
+
+   Tier 3 is admitted for one reason: a circuit is only usable if the caller
+   knows each gate's wire count and parameter names, and the SDK's operator
+   manifest is the only authority for that. Reimplementing it here would create
+   a second source of truth that drifts. When you add a tier-3 dependency,
+   extend the table in `tests/test_api_contract.py` in the same change.
 
 4. **No network egress, no credentials, no hardware.** Every tool in this
    repository runs locally and deterministically. Tools must never submit

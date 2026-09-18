@@ -35,7 +35,7 @@ async def test_the_server_starts_and_lists_its_surface(transport: StdioTransport
         resources = await client.list_resources()
         prompts = await client.list_prompts()
 
-    assert len(tools) == 9
+    assert len(tools) == 15
     assert len(resources) == 3
     assert len(prompts) == 3
 
@@ -78,4 +78,4 @@ async def test_a_resource_reads_over_the_wire(transport: StdioTransport) -> None
     payload = json.loads(contents[0].text)
 
     assert contents[0].mimeType == "application/json"
-    assert payload["n_gates"] == 45
+    assert payload["n_gates"] == 35

@@ -25,7 +25,6 @@ from flagquantum_mcp_server.analysis import analyze
 from flagquantum_mcp_server.circuits import (
     CircuitFormat,
     deserialize,
-    known_gate_names,
     serialize,
 )
 from flagquantum_mcp_server.compilation import (
@@ -33,6 +32,7 @@ from flagquantum_mcp_server.compilation import (
     optimize_circuit,
     route_circuit,
 )
+from flagquantum_mcp_server.drawing import draw_circuit
 from flagquantum_mcp_server.emission import emit_openqasm, emit_qcis
 from flagquantum_mcp_server.errors import (
     INTERNAL_ERROR,
@@ -40,7 +40,10 @@ from flagquantum_mcp_server.errors import (
     ToolError,
     error_payload,
 )
+from flagquantum_mcp_server.gates import gate_records
+from flagquantum_mcp_server.parameters import bind_parameters, inspect_parameters
 from flagquantum_mcp_server.planning import plan_execution
+from flagquantum_mcp_server.structure import describe_layers, describe_topology
 
 INSTRUCTIONS = """\
 FlagQuantum is a quantum AI framework whose circuits are built, compiled and
@@ -97,7 +100,9 @@ def analyze_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> 
     """Report gate counts, depth and wire usage for one circuit.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -120,7 +125,9 @@ def serialize_circuit_tool(
     hash.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         indent: Optional indentation width for the returned JSON.
 
@@ -153,7 +160,9 @@ def optimize_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") ->
     """Apply target-independent optimizations and report what changed.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -177,7 +186,9 @@ def route_circuit_tool(
     """Route a circuit onto a coupling map, inserting SWAPs where needed.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topology: "line", "ring", "grid" or "custom".
         rows: Grid rows; required when topology is "grid".
@@ -214,7 +225,9 @@ def compare_topologies_tool(
     """Route one circuit onto several topologies and compare the cost.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topologies: Topology kinds to compare; defaults to line, ring and grid.
         strategy: "restore_after_each_gate" or "persistent_layout".
@@ -244,7 +257,9 @@ def emit_openqasm_tool(
     """Render a circuit as OpenQASM 2.0 or 3.0 text.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         version: OpenQASM version, 2.0 or 3.0.
         result_wires: Wires to measure; omit to measure every wire.
@@ -267,7 +282,9 @@ def emit_qcis_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[s
     """Render a circuit as QCIS text.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -288,7 +305,9 @@ def plan_execution_tool(
     """Plan execution without running anything.
 
     Args:
-                circuit: Circuit payload. With circuit_format="qir" pass a gate list such as '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM text is not accepted.
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         options: Partial execution options. Supported keys: mode, backend,
             device, target, batch_size, precision, shots, seed,
@@ -306,6 +325,157 @@ def plan_execution_tool(
     return plan_execution(circuit, circuit_format, options=options, outputs=outputs)
 
 
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def describe_gate_set_tool(gates: Sequence[str] | None = None) -> dict[str, Any]:
+    """Describe gates: wire count, parameter names, aliases and kind.
+
+    Call this before writing a gate list by hand. A gate's signature is not
+    part of the circuit format, so this is the only place to learn that ``rz``
+    takes one parameter named ``theta`` while ``u3`` takes three.
+
+    Args:
+        gates: Gate names or aliases to describe. Omit to describe every gate.
+
+    Returns:
+        One record per gate with opcode, aliases, arity, parameters,
+        differentiable and semantic_kind.
+    """
+    return gate_records(list(gates) if gates is not None else None)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def inspect_parameters_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
+    """Report whether a circuit is parameterized, and where each symbol sits.
+
+    A parameterized circuit travels as IR, because a gate list carries numbers
+    and has no way to name a symbol.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+
+    Returns:
+        is_parameterized, the parameter names, and one entry per occurrence
+        naming the gate, wire and instruction index.
+    """
+    return inspect_parameters(circuit, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def bind_parameters_tool(
+    circuit: str,
+    values: Mapping[str, float],
+    circuit_format: CircuitFormat = "ir",
+) -> dict[str, Any]:
+    """Substitute values for a circuit's parameters.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+        values: One number per parameter name, for example {"theta": 0.5}.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+
+    Returns:
+        The bound circuit as canonical IR, with its analysis and content hash.
+        The result is no longer parameterized and can be planned or exported.
+    """
+    return bind_parameters(circuit, values, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def describe_layers_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
+    """Decompose a circuit into the layers it can execute in.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+        circuit_format: "ir" or "qir".
+
+    Returns:
+        One entry per layer listing its gates and wires, plus n_layers, which
+        is the circuit's depth. Gates in one layer run concurrently.
+    """
+    return describe_layers(circuit, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def describe_topology_tool(
+    n_qubits: int,
+    topology: str = "line",
+    rows: int | None = None,
+    cols: int | None = None,
+    edges: Sequence[Sequence[int]] | None = None,
+    pairs: Sequence[Sequence[int]] | None = None,
+) -> dict[str, Any]:
+    """Describe a coupling map before routing onto it.
+
+    Args:
+        n_qubits: Number of wires the topology must hold.
+        topology: "line", "ring", "grid" or "custom".
+        rows: Grid rows; required for "grid", or derived when both are omitted.
+        cols: Grid columns; see rows.
+        edges: Explicit wire pairs; required for "custom".
+        pairs: Specific wire pairs to measure. Omit to measure adjacent wires.
+
+    Returns:
+        The edge list, each wire's neighbours and degree, and the shortest path
+        and distance between each requested pair. Distance is the number of
+        SWAPs a naive route needs.
+    """
+    return describe_topology(
+        n_qubits=n_qubits,
+        topology=topology,
+        rows=rows,
+        cols=cols,
+        edges=edges,
+        pairs=pairs,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def draw_circuit_tool(
+    circuit: str,
+    circuit_format: CircuitFormat = "ir",
+    decimals: int = 3,
+    line_width: int = 100,
+    show_all_wires: bool = False,
+    show_initial_state: bool = False,
+) -> dict[str, Any]:
+    """Draw a circuit as text.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
+            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+        circuit_format: "ir" or "qir".
+        decimals: Digits shown per parameter.
+        line_width: Maximum characters per wire line before the drawer wraps.
+        show_all_wires: Keep wires that carry no gate.
+        show_initial_state: Annotate each wire's initial state.
+
+    Returns:
+        The diagram as text, plus its line count and the circuit content hash.
+    """
+    return draw_circuit(
+        circuit,
+        circuit_format,
+        decimals=decimals,
+        line_width=line_width,
+        show_all_wires=show_all_wires,
+        show_initial_state=show_initial_state,
+    )
+
+
 @mcp.resource("flagquantum://version", mime_type="application/json")
 def version_resource() -> dict[str, Any]:
     """Versions of this server, the SDK it wraps, and the IR contract."""
@@ -321,18 +491,14 @@ def version_resource() -> dict[str, Any]:
 
 @mcp.resource("flagquantum://gate-set", mime_type="application/json")
 def gate_set_resource() -> dict[str, Any]:
-    """Gate names accepted by the installed FlagQuantum, derived at runtime."""
-    names = known_gate_names()
-    sdk = load_sdk()
-    return {
-        "n_gates": len(names),
-        "gates": names,
-        "flagquantum_version": str(sdk.__version__),
-        "note": (
-            "Derived from the installed SDK's public Circuit API rather than "
-            "hard-coded, so this list always matches the version in use."
-        ),
-    }
+    """Every gate the installed FlagQuantum accepts, with its signature.
+
+    Unlike ``describe_gate_set_tool``, which answers about named gates, this
+    resource is the whole table: a client can pull it once and hold it.
+    """
+    payload = gate_records()
+    payload["flagquantum_version"] = str(load_sdk().__version__)
+    return payload
 
 
 @mcp.resource("flagquantum://ir-schema", mime_type="application/json")
