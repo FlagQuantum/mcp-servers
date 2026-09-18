@@ -299,37 +299,76 @@ def test_the_prediction_grows_with_steps_and_with_width() -> None:
     assert predict_seconds(wide, 5) > predict_seconds(narrow, 5)
 
 
+def test_the_gate_term_is_the_coefficient_times_instructions_times_state() -> None:
+    """The slope is pinned to a value, not just a direction.
+
+    The calibration test below only shows that the prediction exceeds the
+    measurement, and the floor hides the slope entirely below twelve wires — so
+    a coefficient wrong by orders of magnitude in the *safe* direction passes
+    every other assertion here. This one reads the constant back.
+    """
+    from flagquantum_mcp_server.training import GATE_COST, STARTUP_SECONDS, predict_seconds
+
+    ir = _ir(json.dumps(_layered_qir(24)))  # 71 instructions, far above the floor
+
+    assert predict_seconds(ir, 1) - STARTUP_SECONDS == pytest.approx(
+        len(ir.instructions) * 2.0**24 * GATE_COST
+    )
+
+
 def test_the_prediction_over_predicts_every_point_it_was_calibrated_from() -> None:
     """The model's only job is to be an upper bound, so this is the whole test.
 
     Measured per-step costs, warm, from the design's table. A model that
     under-predicts anywhere here declines to protect the caller exactly where
     the caller most needs it.
+
+    The table runs from 1 instruction to 188, not just over the one-layer
+    ansatz, and the low rows are the ones that carry the fixed cost: a flat
+    per-step floor covers them by accident at four wires and by 105x too little
+    at twenty-two, so a table of only the 35-to-71-instruction circuits cannot
+    tell a state term that is present from one that is missing. The failure this
+    test was written for — a 24-wire, one-gate circuit admitted for 35 steps and
+    taking 438 s — lived entirely in the rows that were absent.
     """
     from flagquantum_mcp_server.training import STARTUP_SECONDS, predict_seconds
 
     measured = [
-        (4, 1, 0.0018),
-        (8, 1, 0.0041),
-        (12, 1, 0.0090),
-        (13, 1, 0.0155),
-        (14, 1, 0.0207),
-        (15, 1, 0.0421),
-        (16, 1, 0.0852),
-        (20, 1, 1.290),
-        (22, 1, 8.56),
-        (24, 1, 68.5),
+        (4, 11, 0.0018),
+        (8, 23, 0.0041),
+        (12, 35, 0.0090),
+        (13, 38, 0.0155),
+        (14, 41, 0.0207),
+        (15, 44, 0.0421),
+        (16, 47, 0.0852),
+        (16, 188, 0.1470),
+        (16, 3, 0.0280),
+        (20, 1, 0.3019),
+        (20, 3, 0.308),
+        (20, 59, 1.2900),
+        (22, 1, 2.1049),
+        (22, 65, 8.5600),
+        (24, 1, 12.5252),
+        (24, 4, 13.1363),
     ]
-    for n_wires, layers, per_step in measured:
-        ir = _ir(json.dumps(_layered_qir(n_wires, layers)))
+    for n_wires, instructions, per_step in measured:
+        ir = _ir(json.dumps(_ansatz_tail_qir(n_wires, instructions)))
+        # The table names a width and an instruction count and the model reads
+        # both, so both are checked: a circuit that quietly came out three wires
+        # wide would measure the state term at the wrong power of two and pass
+        # while doing it.
+        assert len(ir.instructions) == instructions, (
+            f"{n_wires} qubits: built {len(ir.instructions)} instructions, not {instructions}"
+        )
+        assert int(ir.n_wires) == n_wires, f"{n_wires} qubits: built width {int(ir.n_wires)}"
         # Strip the one-time startup, which belongs to no single step. Read from
         # the module rather than written as 0.5, so that changing the constant
         # changes what this compares instead of quietly comparing nothing.
         predicted = predict_seconds(ir, 1) - STARTUP_SECONDS
 
         assert predicted > per_step, (
-            f"{n_wires} qubits: predicted {predicted:.4f}s per step against "
-            f"{per_step:.4f}s measured"
+            f"{n_wires} qubits, {instructions} instructions: predicted "
+            f"{predicted:.4f}s per step against {per_step:.4f}s measured"
         )
 
 
@@ -382,3 +421,19 @@ def _layered_qir(n_wires: int, layers: int = 1) -> list[dict[str, object]]:
             for wire in range(n_wires)
         )
     return gates
+
+
+def _ansatz_tail_qir(n_wires: int, instructions: int) -> list[dict[str, object]]:
+    """The last ``instructions`` gates of the ``_layered_qir`` ansatz.
+
+    Taken from the end of the list rather than the start, because the width is
+    inferred from the wires the gates touch: the first gates of a layer are the
+    ``ry`` block, so a three-gate *prefix* of a sixteen-wire ansatz is a
+    three-wire circuit and the fixed per-step cost this table is mostly about
+    would never be reached. The last gate of a layer is ``rz(n_wires - 1)``, so
+    any non-empty tail spans the full width. A count that is a whole number of
+    layers gives the whole ansatz either way.
+    """
+    per_layer = 3 * n_wires - 1
+    layers = -(-instructions // per_layer)
+    return _layered_qir(n_wires, layers)[-instructions:]

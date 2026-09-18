@@ -112,41 +112,51 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     return build
 
 
-# The budget model's three constants. Calibrated from warm per-step measurements
-# at 4, 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits; the table is in the design
-# document and every point is pinned by a test. The model over-predicts at all
-# of them, by 1.7x at the worst.
+# The budget model's constants. Calibrated from warm per-step measurements at 4,
+# 8, 12, 13, 14, 15, 16, 20, 22 and 24 qubits, over circuits from 1 to 188
+# instructions; the table is in the design document and every point is pinned by
+# a test. The model over-predicts at all sixteen points, by 1.9x at the worst.
+#
+# Three costs, each of them one that was measured rather than assumed:
 STARTUP_SECONDS = 0.5
-MIN_STEP_SECONDS = 0.02
-STEP_COST_COEFFICIENT = 1e-7
+MIN_STEP_SECONDS = 0.02  # dispatch, for circuits too small for either term below
+STATE_COST = 1.5e-6  # per step per amplitude: holding the state
+GATE_COST = 1e-7  # per step per amplitude per instruction: applying gates
 
 
 def predict_seconds(ir: Any, steps: int) -> float:
     """Predict how long ``steps`` updates will take, in seconds.
 
-    Two terms, because cost has two regimes. ``STARTUP_SECONDS`` is the one-time
-    ``make_fx`` trace ``Module`` performs when it first compiles the builder.
-    The rest is work: gates applied against a state of ``2 ** n_wires``
-    amplitudes, so it is the product of the two, floored at the dispatch cost
-    that dominates at small widths.
+    Three terms, because cost has three regimes. ``STARTUP_SECONDS`` is the
+    one-time ``make_fx`` trace ``Module`` performs when it first compiles the
+    builder. The other two are paid on every step: ``STATE_COST`` per amplitude
+    for holding a state of ``2 ** n_wires``, and ``GATE_COST`` per amplitude per
+    instruction for applying gates against it. They are separate terms because
+    they were measured to be: at twenty-four wires a single gate costs 12.5 s per
+    step, which is 7.5x what one instruction explains, and a single
+    width-independent floor could not see that cost at all.
 
-    The floor is generous on purpose. It is 20 ms where 1.8 ms was measured at
-    four qubits, which at the default 60-second budget is the difference between
-    a caller being allowed three thousand steps and thirty thousand. Three
-    thousand is already more than anyone reads, and a model that is an upper
-    bound everywhere is worth more than one that is tight at the bottom.
+    The floor sits under both. It is generous on purpose: 20 ms where 1.8 ms was
+    measured at four qubits, which at the default 60-second budget is the
+    difference between a caller being allowed three thousand steps and thirty
+    thousand. Three thousand is already more than anyone reads, and a model that
+    is an upper bound everywhere is worth more than one that is tight at the
+    bottom.
 
-    A single coefficient cannot follow the true curve, which falls from 1.0e-5
-    per instruction-state at four qubits to 2.1e-8 at twenty and rises again to
-    5.7e-8 at twenty-four as the state stops fitting where it used to. The
-    coefficient clears the highest point rather than the average one.
+    A single coefficient cannot follow the true curve either, which falls from
+    1.0e-5 per instruction-state at four qubits to 2.1e-8 at twenty and rises
+    again to 5.7e-8 at twenty-four as the state stops fitting where it used to.
+    ``GATE_COST`` clears the highest point rather than the average one.
 
-    Where that leaves the margin, over every width it was calibrated at: 11x at
-    four qubits and 4.9x at eight, where the floor is doing all the work; 2.0x
-    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest margin
-    and the one that matters least, because the budget refuses every run there —
-    one step is 119.6 s predicted against a 60 s bound. Twenty-two qubits is the
-    widest width that admits a run at all: one step 27.8 s, two 55.0 s.
+    Where that leaves the margin, over the sixteen points it was calibrated at:
+    11x at four qubits and 4.9x at eight, where the floor is doing all the work;
+    between 2.0x and 8.4x everywhere else, thinnest at twenty-four wires with
+    four instructions and thickest at sixteen wires with four layers. The
+    thinnest matters least, because the budget admits almost nothing there: the
+    state term alone is 25.2 s per step at twenty-four wires, so no circuit at
+    that width gets more than two steps, and the full ansatz there, 119.1 s per
+    step, gets none at all. Twenty-two wires costs 6.3 s per step, and a
+    one-gate circuit at that width gets nine.
 
     Args:
         ir: A validated ``CircuitIR``.
@@ -158,7 +168,8 @@ def predict_seconds(ir: Any, steps: int) -> float:
     """
     per_step = max(
         MIN_STEP_SECONDS,
-        len(ir.instructions) * 2.0 ** int(ir.n_wires) * STEP_COST_COEFFICIENT,
+        2.0 ** int(ir.n_wires) * STATE_COST,  # holding the state
+        len(ir.instructions) * 2.0 ** int(ir.n_wires) * GATE_COST,  # applying gates
     )
     return STARTUP_SECONDS + steps * per_step
 
