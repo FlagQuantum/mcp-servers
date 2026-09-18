@@ -988,7 +988,7 @@ def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
     ir = _ir(qir)
     module = fq.Module(
         replay_builder(ir),
-        parameters={name: 1 for name in parameter_names(ir)},
+        parameters=dict.fromkeys(parameter_names(ir), 1),
         init={"t0": 0.8, "t1": 0.3},
         hamiltonian=Hamiltonian([pauli_term(1.0, {1: "Y"})]),
         policy=fq.RuntimePolicy(observable="hamiltonian"),
@@ -2044,7 +2044,7 @@ def train_parameters(
     # zero-element group raises IndexError inside the builder rather than here.
     module = sdk.Module(
         replay_builder(ir),
-        parameters={name: 1 for name in names},
+        parameters=dict.fromkeys(names, 1),
         init=dict(starting),
         hamiltonian=objective,
         policy=sdk.RuntimePolicy(observable="hamiltonian"),
