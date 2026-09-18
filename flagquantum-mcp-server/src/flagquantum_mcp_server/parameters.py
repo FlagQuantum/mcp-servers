@@ -1,10 +1,10 @@
 """Inspect and bind circuit parameters.
 
-A variational circuit carries symbols rather than numbers, and the qir gate
-list cannot express that: its ``params`` are values. So a parameterized circuit
-only travels as IR, where a parameter is encoded as ``{"$parameter": "theta"}``.
-Both tools here therefore take ``circuit_format="ir"`` in practice, and the
-error says so rather than failing obscurely.
+A variational circuit carries symbols rather than numbers. A symbol is written
+``{"theta": {"$parameter": "theta"}}`` in either input format; a plain number in
+that slot is a bound angle rather than a symbol, and a bare string is neither,
+so it is rejected at the input boundary (see
+:func:`flagquantum_mcp_server.circuits._check_parameter_values`).
 
 Binding is what turns symbols into an executable circuit, and it is the step
 between "here is my ansatz" and "here is the circuit I planned".
@@ -32,8 +32,8 @@ def inspect_parameters(
     """Report whether a circuit is parameterized, and where each symbol sits.
 
     Args:
-        circuit: Serialized circuit. Send IR: a qir gate list cannot carry a
-            symbol, only a number.
+        circuit: Serialized circuit, in either format. A symbol is written
+            ``{"theta": {"$parameter": "theta"}}``.
         circuit_format: Either ``"ir"`` or ``"qir"``.
 
     Returns:

@@ -163,3 +163,63 @@ def test_a_custom_opcode_with_a_matrix_is_still_allowed() -> None:
     )
 
     assert ir.n_wires == 1
+
+
+# --- parameter values ---
+#
+# A parameter value is either a number or one of the encodings the SDK's own
+# decoder understands. Anything else is accepted by the SDK and stored as an
+# opaque value that no longer reads as a parameter, which is how a circuit
+# silently loses its symbol.
+
+
+def test_a_number_is_accepted_as_a_parameter_value() -> None:
+    ir = resolve_ir(_gate("rz", [0], parameters={"theta": 0.5}), "qir")
+
+    assert ir.instructions[0].params == {"theta": 0.5}
+
+
+def test_a_parameter_marker_is_accepted_and_decoded() -> None:
+    ir = resolve_ir(_gate("ry", [0], parameters={"theta": {"$parameter": "theta"}}), "qir")
+
+    assert ir.instructions[0].params["theta"].name == "theta"
+
+
+def test_an_expression_marker_is_accepted_and_decoded() -> None:
+    marker = {"$expression": {"op": "mul", "args": [2, {"$parameter": "theta"}]}}
+
+    ir = resolve_ir(_gate("ry", [0], parameters={"theta": marker}), "qir")
+
+    assert ir.instructions[0].params["theta"].op == "mul"
+
+
+def test_a_bare_string_angle_is_rejected() -> None:
+    """The failure this guards: a string that draws as if it were a symbol.
+
+    Left alone the SDK stores it, ``draw_circuit_tool`` renders ``RY(theta)``
+    exactly as it would for a real symbol, and the circuit is planned as though
+    it were executable.
+    """
+    with pytest.raises(ToolInputError, match="is a string"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": "theta"}), "qir")
+
+
+def test_a_misspelled_marker_is_rejected_rather_than_ignored() -> None:
+    with pytest.raises(ToolInputError, match=r"\$parameter"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": {"$unknown": "theta"}}), "qir")
+
+
+def test_a_non_string_parameter_name_is_rejected() -> None:
+    """``{"$parameter": 3}`` decodes to ``Parameter("3")``: the name changes."""
+    with pytest.raises(ToolInputError, match=r"\$parameter"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": {"$parameter": 3}}), "qir")
+
+
+def test_an_empty_parameter_name_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match=r"\$parameter"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": {"$parameter": ""}}), "qir")
+
+
+def test_a_null_angle_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="null"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": None}), "qir")

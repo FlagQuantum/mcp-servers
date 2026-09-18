@@ -43,6 +43,14 @@ IR_KIND = "flagquantum.circuit_ir"
 
 CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 
+# The parameter encodings the SDK's own decoder understands. A value mapping
+# that carries one of these keys becomes a live ``Parameter``,
+# ``ParameterExpression``, ``complex`` or tensor; a mapping that carries none of
+# them is kept as an opaque dict instead. That silent fall-through is how a
+# misspelled marker turns a parameterized circuit into one that reports "no
+# parameters", so the input boundary rejects it rather than passing it on.
+VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression", "$complex", "$tensor")
+
 
 def resolve_ir(circuit: CircuitPayload, circuit_format: CircuitFormat = IR_FORMAT) -> Any:
     """Parse caller input and return a validated ``CircuitIR``.
@@ -106,11 +114,32 @@ def _ir_from_decoded(decoded: Any) -> Any:
             "Use serialize_circuit_tool to produce a valid payload, or pass "
             "circuit_format='qir' for a gate list."
         )
+    _check_ir_parameter_values(decoded)
     sdk = load_sdk()
     try:
         return sdk.CircuitIR.from_dict(decoded)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, KeyError) as exc:
         raise ToolInputError(f"Circuit IR failed validation: {exc}") from exc
+
+
+def _check_ir_parameter_values(decoded: Mapping[str, Any]) -> None:
+    """Check every instruction's parameter values in a decoded IR payload.
+
+    The envelope is validated by the SDK, but a parameter *value* is not: a
+    bare string or a misspelled marker is stored as an opaque value, and the
+    circuit then reports itself as unparameterized. Checking here keeps the two
+    input formats from disagreeing about the same circuit.
+    """
+    instructions = decoded.get("instructions")
+    if not isinstance(instructions, Sequence) or isinstance(instructions, (str, bytes)):
+        return
+    for position, instruction in enumerate(instructions):
+        if isinstance(instruction, Mapping):
+            _check_parameter_values(
+                instruction.get("params"),
+                str(instruction.get("opcode")),
+                f"Instruction {position}",
+            )
 
 
 def _ir_from_qir(decoded: Any) -> Any:
@@ -121,6 +150,15 @@ def _ir_from_qir(decoded: Any) -> Any:
     ``max() iterable argument is empty``, which tells a caller nothing — and the
     most likely malformation is a caller reusing the key names from our own IR
     schema (``opcode``/``wires`` instead of ``name``/``index``).
+
+    The finished circuit is round-tripped through ``CircuitIR.from_dict``
+    because ``Circuit.from_qir`` takes parameter values literally: a
+    ``{"$parameter": ...}`` marker handed to it is stored as a plain dict rather
+    than decoded into a ``Parameter``. The circuit then reports no parameters
+    while serialization echoes the marker back, so ``inspect_parameters_tool``
+    and ``serialize_circuit_tool`` contradict each other. Re-decoding is what
+    its own serializer produced restores the symbol, and costs nothing for a
+    circuit that carries no marker.
     """
     if not isinstance(decoded, Sequence) or isinstance(decoded, (str, bytes)):
         raise ToolInputError(
@@ -136,8 +174,9 @@ def _ir_from_qir(decoded: Any) -> Any:
     gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
     sdk = load_sdk()
     try:
-        return sdk.Circuit.from_qir(gates).to_ir()
-    except (ValueError, TypeError) as exc:
+        built = sdk.Circuit.from_qir(gates).to_ir()
+        return sdk.CircuitIR.from_dict(built.to_dict())
+    except (ValueError, TypeError, KeyError) as exc:
         raise ToolInputError(f"Gate list could not be built into a circuit: {exc}") from exc
 
 
@@ -204,6 +243,7 @@ def _validate_gate(gate: Any, position: int) -> dict[str, Any]:
         )
     _check_known_name(name, gate, prefix)
     _check_signature(name, wires, gate.get("parameters"), prefix)
+    _check_parameter_values(gate.get("parameters"), name, prefix)
     return {**gate, "index": wires}
 
 
@@ -280,6 +320,85 @@ def _check_signature(name: str, wires: list[int], params: Any, prefix: str) -> N
             f"{prefix} ({name!r}) is missing parameter(s) {missing}. "
             f"This gate takes {list(accepted)}, in that order."
         )
+
+
+def _check_parameter_values(params: Any, gate: str, prefix: str) -> None:
+    """Reject a parameter value the SDK would store without understanding it.
+
+    The SDK accepts any JSON value in a parameter slot. A number is a bound
+    angle and a :data:`VALUE_MARKERS` mapping is a symbol or an expression, but
+    a bare string or a misspelled marker is neither: it is stored as an opaque
+    value that no longer reads as a parameter. The circuit then reports
+    ``is_parameterized: false`` while a diagram renders the string exactly as it
+    renders a real symbol and execution is planned without complaint — so the
+    mistake surfaces at the far end of the pipeline, if at all.
+
+    Gates outside the built-in manifest are checked too: their parameter names
+    are unknown, but a value's shape is not.
+
+    Args:
+        params: The gate's ``parameters`` mapping, if any.
+        gate: Gate name as written, used in the message.
+        prefix: Position label used to name the offending instruction.
+
+    Raises:
+        ToolInputError: If a value is neither a number nor a known encoding.
+    """
+    if not isinstance(params, Mapping):
+        return
+    for name, value in params.items():
+        _check_parameter_value(value, str(name), gate, prefix)
+
+
+def _check_parameter_value(value: Any, name: str, gate: str, prefix: str) -> None:
+    """Check one parameter value against the shapes the SDK can decode."""
+    if isinstance(value, (int, float)):
+        return
+    if isinstance(value, Mapping):
+        _check_marker(value, name, gate, prefix)
+        return
+    reason = (
+        "a string is stored as an ordinary value rather than a symbol"
+        if isinstance(value, str)
+        else f"a parameter value is a number or one of {list(VALUE_MARKERS)}"
+    )
+    raise ToolInputError(
+        f"{prefix} ({gate!r}) parameter {name!r} {_describe(value)}. A gate "
+        "argument is either a number or a symbol written as "
+        f'{{"$parameter": "{name}"}}; {reason}, so the circuit would report '
+        "itself as unparameterized."
+    )
+
+
+def _check_marker(value: Mapping[str, Any], name: str, gate: str, prefix: str) -> None:
+    """Check a mapping parameter value against the SDK's marker vocabulary."""
+    if not any(marker in value for marker in VALUE_MARKERS):
+        raise ToolInputError(
+            f"{prefix} ({gate!r}) parameter {name!r} has the value {dict(value)!r}, "
+            f"which carries none of the encodings {list(VALUE_MARKERS)}. A symbol "
+            f'is written as {{"$parameter": "{name}"}}. The SDK keeps an '
+            "unrecognized marker as an opaque value rather than a symbol, so the "
+            "circuit would report itself as unparameterized."
+        )
+    if "$parameter" in value:
+        symbol = value["$parameter"]
+        if not isinstance(symbol, str) or not symbol:
+            raise ToolInputError(
+                f"{prefix} ({gate!r}) parameter {name!r} has the '$parameter' "
+                f"marker {symbol!r}; it must be a non-empty string naming the "
+                f'symbol, as in {{"$parameter": "{name}"}}.'
+            )
+
+
+def _describe(value: Any) -> str:
+    """Name a rejected value in the terms the caller wrote it in."""
+    if isinstance(value, str):
+        return f"is a string ({value!r})"
+    if value is None:
+        return "is null"
+    if isinstance(value, (list, tuple)):
+        return f"is a list ({value!r})"
+    return f"has unsupported value {value!r}"
 
 
 def enforce_limits(ir: Any) -> Any:

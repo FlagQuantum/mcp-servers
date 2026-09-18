@@ -27,6 +27,10 @@ GHZ3_QIR = [
     {"name": "cx", "index": [0, 1]},
     {"name": "cx", "index": [1, 2]},
 ]
+ANGLED_QIR = [
+    {"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "theta"}}},
+    {"name": "cx", "index": [0, 1]},
+]
 
 
 @pytest.fixture
@@ -39,3 +43,9 @@ def bell_qir() -> str:
 def ghz3_qir() -> str:
     """A three-qubit GHZ circuit as a gate-list JSON string."""
     return json.dumps(GHZ3_QIR)
+
+
+@pytest.fixture
+def angled_qir() -> str:
+    """A gate list whose angle is a symbol, not a number."""
+    return json.dumps(ANGLED_QIR)

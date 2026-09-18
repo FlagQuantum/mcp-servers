@@ -127,6 +127,13 @@ to write by hand:
 [{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]
 ```
 
+A gate carries its arguments under **`parameters`**, which the example above
+never shows because neither gate takes one:
+
+```json
+[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]
+```
+
 **The two formats use different key names**, and this is the most common
 mistake: the gate list calls a gate `name` and its wires `index`, while serialized
 IR calls them `opcode` and `wires`. Sending IR keys as `qir` is rejected with a
@@ -138,11 +145,55 @@ circuit. A bare integer is accepted for a single-wire gate
 Either format can be passed to any tool; `serialize_circuit_tool` converts
 `qir` into canonical `ir`.
 
+One more naming trap: an IR payload's version field is spelled **`version`**,
+and sending `ir_version` instead is rejected as an unknown key — but tool
+results report that same field as `ir_version`. The payload key and the reported
+key are not spelled the same way.
+
 `circuit_format` is a closed set — the JSON schema publishes
 `"enum": ["ir", "qir"]`, so a wrong value is rejected before any tool body runs.
 **OpenQASM text is not a supported input.** FlagQuantum ships emitters but no
 QASM parser, so there is nothing to convert it with; a caller holding OpenQASM
 has to load it into FlagQuantum itself and send the resulting IR.
+
+### On parameters
+
+A gate parameter is either a number or a **symbol**, and a symbol is written as
+a one-key object naming it:
+
+```json
+{"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "theta"}}}
+```
+
+This works in both input formats. A symbol is what makes a circuit an ansatz:
+`inspect_parameters_tool` reports it, and `bind_parameters_tool` substitutes a
+number for it.
+
+**A bare string is not a symbol.** `{"theta": "theta"}` is a value, not a
+reference; the SDK stores it as one, so the circuit reports itself as
+unparameterized. Nothing else complains: `draw_circuit_tool` prints the value it
+was handed, and a string prints as `RY(theta)` — indistinguishable from a real
+symbol — while `plan_execution_tool` plans the circuit for execution. So the
+input boundary rejects it, along with a misspelled marker (`{"$unknown": ...}`)
+and a non-string symbol name, naming the gate and the parameter. The other
+encodings a parameter may carry are `$expression`, `$complex` and `$tensor`; a
+mapping carrying none of those four keys is rejected for the same reason. The
+`flagquantum://ir-schema` resource carries a worked `parameter_example`.
+
+One rough edge, inherited from the SDK: a *real* symbol is rendered as the SDK's
+repr of it, so `RY(theta)` appears as `RY(Parameter(name='theta'))`.
+FlagQuantum's `Parameter` defines no `__str__`, so `str()` falls through to
+`__repr__`. The symbol is intact — only the diagram's spelling is clumsy — and
+it affects both input formats equally.
+
+### On emitted text
+
+`emit_openqasm_tool` measures every wire unless `result_wires` names the ones you
+want, so the emitted program normally carries measurements the source circuit
+does not — a Bell circuit with no `measurements` still emits `c = measure q;`.
+The `content_hash` in the result identifies the **source circuit**, not the
+emitted text; the two agree only when the source already measures everything.
+`emit_qcis_tool` appends nothing.
 
 ### On `content_hash`
 

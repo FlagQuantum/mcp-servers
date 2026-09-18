@@ -61,7 +61,8 @@ A typical session:
 
 Read the flagquantum://gate-set resource for the available gate names and
 flagquantum://ir-schema for the IR envelope. IR JSON is the canonical format;
-every IR payload carries an ir_version and a content_hash. The hash covers the
+every IR payload carries a "version" and a content_hash. Tool results
+report that same field as "ir_version". The hash covers the
 whole payload, metadata included, so two payloads with the same gates but
 different metadata hash differently; see flagquantum://ir-schema.
 """
@@ -101,16 +102,27 @@ def _structured_errors(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[
 def analyze_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Report gate counts, depth and wire usage for one circuit.
 
+    Gate counts and depth are self-explanatory; the rest of the analysis is
+    worth stating. wire_usage has one entry per wire, counting the instructions
+    that touch it, so a two-qubit gate counts on both of its wires.
+    two_qubit_gates counts width-2 instructions and multi_qubit_gates counts
+    width-3-and-up, so a cx is two-qubit and not multi. max_gate_width is the
+    widest single instruction, and channel_count counts instructions marked as
+    channels in metadata, with has_noise being channel_count > 0.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
         The circuit identity (qubit count, IR version, content hash) and the
-        SDK's structural analysis: gate_counts, depth, n_instructions,
-        wire_usage, two_qubit_gates and related fields.
+        SDK's structural analysis.
     """
     return analyze(circuit, circuit_format)
 
@@ -128,8 +140,12 @@ def serialize_circuit_tool(
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         indent: Optional indentation width for the returned JSON.
 
@@ -163,8 +179,12 @@ def optimize_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") ->
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -187,10 +207,18 @@ def route_circuit_tool(
 ) -> dict[str, Any]:
     """Route a circuit onto a coupling map, inserting SWAPs where needed.
 
+    The SWAP overhead is reported as ``instruction_delta``: a non-zero delta
+    means the routed circuit is not the same size as the source, so it should
+    not be described as equivalent to it.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topology: "line", "ring", "grid" or "custom".
         rows: Grid rows; required when topology is "grid".
@@ -226,10 +254,17 @@ def compare_topologies_tool(
 ) -> dict[str, Any]:
     """Route one circuit onto several topologies and compare the cost.
 
+    One entry per topology, each with its routed gate count, depth and SWAP
+    overhead, plus which topology was cheapest on those measures.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         topologies: Topology kinds to compare; defaults to line, ring and grid.
         strategy: "restore_after_each_gate" or "persistent_layout".
@@ -258,10 +293,18 @@ def emit_openqasm_tool(
 ) -> dict[str, Any]:
     """Render a circuit as OpenQASM 2.0 or 3.0 text.
 
+    The result measures every wire unless ``result_wires`` says otherwise, so
+    the emitted text usually carries measurements that the source circuit does
+    not. ``content_hash`` identifies that source circuit, not the text.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         version: OpenQASM version, 2.0 or 3.0.
         result_wires: Wires to measure; omit to measure every wire.
@@ -283,10 +326,17 @@ def emit_openqasm_tool(
 def emit_qcis_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Render a circuit as QCIS text.
 
+    A circuit containing an arbitrary matrix gate comes back as an error rather
+    than as text, because QCIS has no way to express one.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -306,10 +356,21 @@ def plan_execution_tool(
 ) -> dict[str, Any]:
     """Plan execution without running anything.
 
+    Nothing is executed and no state is allocated: the result is the resolved
+    execution contract (mode, backend, device, precision) plus a summary
+    carrying depth, state_bytes, shardable_wires and the claim fields
+    (claim_evidence_type, scalability_claim_allowed, release_gate_allowed) that
+    say what this plan does and does not license. Running the circuit is the
+    caller's own step, through ``fq.run``.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         options: Partial execution options. Supported keys: mode, backend,
             device, target, batch_size, precision, shots, seed,
@@ -351,13 +412,18 @@ def describe_gate_set_tool(gates: Sequence[str] | None = None) -> dict[str, Any]
 def inspect_parameters_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Report whether a circuit is parameterized, and where each symbol sits.
 
-    A parameterized circuit travels as IR, because a gate list carries numbers
-    and has no way to name a symbol.
+    A symbol is written ``{"theta": {"$parameter": "theta"}}`` in either input
+    format. A bare string is not a symbol: it is a value, and the circuit would
+    report itself as unparameterized, so it is rejected instead.
 
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
     Returns:
@@ -376,10 +442,17 @@ def bind_parameters_tool(
 ) -> dict[str, Any]:
     """Substitute values for a circuit's parameters.
 
+    The result is no longer parameterized, so it can be planned or exported,
+    unlike the circuit that went in.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         values: One number per parameter name, for example {"theta": 0.5}.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
 
@@ -395,10 +468,17 @@ def bind_parameters_tool(
 def describe_layers_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[str, Any]:
     """Decompose a circuit into the layers it can execute in.
 
+    Gates in one returned layer run concurrently, so n_layers is the circuit's
+    depth: it is the longest chain of gates that cannot be reordered.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" or "qir".
 
     Returns:
@@ -419,6 +499,11 @@ def describe_topology_tool(
     pairs: Sequence[Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     """Describe a coupling map before routing onto it.
+
+    For each requested pair the result gives the shortest path and its distance,
+    where distance is the number of edges on that path — the number of SWAPs a
+    naive route would need, so adjacent wires are distance 1. Omit ``pairs`` to
+    measure adjacent wires.
 
     Args:
         n_qubits: Number of wires the topology must hold.
@@ -455,10 +540,18 @@ def draw_circuit_tool(
 ) -> dict[str, Any]:
     """Draw a circuit as text.
 
+    A symbol is rendered as the SDK's repr of it, so ``RY(theta)`` appears as
+    ``RY(Parameter(name='theta'))``. That is the symbol, not a broken value:
+    FlagQuantum's ``Parameter`` defines no ``__str__``.
+
     Args:
         circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
-            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'; with
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not accepted.
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'. A gate
+            carries its arguments under "parameters", so a rotation is
+            '[{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}]'. With
+            circuit_format="ir" pass FlagQuantum IR JSON. A parameter is a number,
+            or a symbol written {"theta": {"$parameter": "theta"}}. OpenQASM is not
+            accepted.
         circuit_format: "ir" or "qir".
         decimals: Digits shown per parameter.
         line_width: Maximum characters per wire line before the drawer wraps.
@@ -508,16 +601,36 @@ def ir_schema_resource() -> dict[str, Any]:
     """The circuit IR envelope, shown by example from a real serialization."""
     sdk = load_sdk()
     sample = sdk.Circuit(2).h(0).cx(0, 1).to_ir()
+    parametric = sdk.Circuit(1).ry(0, sdk.Parameter("theta")).to_ir()
     return {
         "kind": "flagquantum.circuit_ir",
         "ir_version": str(sdk.IR_VERSION),
         "example": sample.to_dict(),
+        "parameter_example": parametric.to_dict(),
         "canonical_json": str(sample.to_json()),
         "content_hash": str(sample.content_hash),
         "notes": [
             "Instructions encode the gate name under the 'opcode' key.",
             "Every IR payload carries 'kind': 'flagquantum.circuit_ir'.",
             "Unknown top-level keys are rejected.",
+            (
+                "A gate parameter value is a number, or a symbol written as "
+                '{"$parameter": "<name>"} — see parameter_example. A bare string '
+                "is a value, not a symbol: it is rejected, because the SDK would "
+                "store it and the circuit would then report itself as "
+                "unparameterized while a diagram still renders it as a symbol. "
+                "The other encodings a parameter may carry are $expression, "
+                "$complex and $tensor; a mapping carrying none of those four keys "
+                "is rejected for the same reason."
+            ),
+            (
+                "Every payload also carries 'dtype' and 'shape'. The SDK writes "
+                "shape as [batch_size, 2 ** n_wires], but the field is not checked "
+                "on load: any shape is accepted and the circuit behaves "
+                "identically, while its content_hash differs. Like 'metadata', "
+                "shape is part of the payload's identity rather than the "
+                "circuit's."
+            ),
             (
                 "content_hash is the SHA-256 of the canonical JSON, which includes "
                 "the 'metadata' object. A payload that omits 'metadata' is accepted "

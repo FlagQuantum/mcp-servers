@@ -7,6 +7,7 @@ import re
 
 import pytest
 
+from flagquantum_mcp_server.analysis import analyze
 from flagquantum_mcp_server.circuits import (
     IR_FORMAT,
     QIR_FORMAT,
@@ -203,3 +204,101 @@ def test_a_bare_integer_index_is_accepted_as_a_one_wire_target() -> None:
 
     assert ir.n_wires == 1
     assert ir.instructions[0].wires == (0,)
+
+
+# --- parameter values ---
+#
+# The IR path decodes ``$parameter`` into a live Parameter, but it does not
+# reject a value it cannot decode — an unrecognized mapping stays an opaque
+# dict. These pin the same boundary the qir path enforces, so a circuit cannot
+# lose its symbol by arriving in one format rather than the other.
+
+
+def _ir_with_params(params: dict[str, object]) -> str:
+    """A one-gate IR payload whose instruction carries ``params``."""
+    return json.dumps(
+        {
+            "kind": "flagquantum.circuit_ir",
+            "version": "1.0",
+            "n_wires": 1,
+            "dtype": "complex64",
+            "shape": [2],
+            "instructions": [
+                {"opcode": "ry", "wires": [0], "params": params, "matrix": None, "metadata": {}}
+            ],
+            "observables": [],
+            "measurements": [],
+            "metadata": {},
+        }
+    )
+
+
+def test_ir_accepts_a_number_as_a_parameter_value() -> None:
+    ir = resolve_ir(_ir_with_params({"theta": 0.5}), IR_FORMAT)
+
+    assert ir.instructions[0].params == {"theta": 0.5}
+
+
+def test_ir_accepts_a_parameter_marker() -> None:
+    ir = resolve_ir(_ir_with_params({"theta": {"$parameter": "theta"}}), IR_FORMAT)
+
+    assert ir.instructions[0].params["theta"].name == "theta"
+
+
+def test_ir_rejects_a_bare_string_angle() -> None:
+    with pytest.raises(ToolInputError, match="is a string"):
+        resolve_ir(_ir_with_params({"theta": "theta"}), IR_FORMAT)
+
+
+def test_ir_rejects_a_misspelled_marker() -> None:
+    with pytest.raises(ToolInputError, match=r"\$parameter"):
+        resolve_ir(_ir_with_params({"theta": {"$unknown": "theta"}}), IR_FORMAT)
+
+
+def test_ir_rejects_a_non_string_parameter_name() -> None:
+    with pytest.raises(ToolInputError, match=r"\$parameter"):
+        resolve_ir(_ir_with_params({"theta": {"$parameter": 3}}), IR_FORMAT)
+
+
+def test_ir_rejects_a_null_angle() -> None:
+    with pytest.raises(ToolInputError, match="null"):
+        resolve_ir(_ir_with_params({"theta": None}), IR_FORMAT)
+
+
+def test_ir_names_the_offending_instruction() -> None:
+    with pytest.raises(ToolInputError, match="Instruction 0"):
+        resolve_ir(_ir_with_params({"theta": "theta"}), IR_FORMAT)
+
+
+def test_the_payload_version_key_is_not_ir_version(bell_qir: str) -> None:
+    """The payload says ``version``; tool results report ``ir_version``.
+
+    Nothing in the payload's own example shows the field name, and a model that
+    sends ``ir_version`` gets an unknown-key rejection, so this pins the
+    asymmetry that the README and the server instructions both state.
+    """
+    canonical = json.loads(serialize(bell_qir, QIR_FORMAT)["ir_json"])
+    assert "version" in canonical
+    assert "ir_version" not in canonical
+
+    renamed = {key: value for key, value in canonical.items() if key != "version"}
+    renamed["ir_version"] = canonical["version"]
+    with pytest.raises(ToolInputError, match="unknown field"):
+        resolve_ir(json.dumps(renamed), IR_FORMAT)
+
+
+def test_the_shape_field_is_carried_but_not_validated(bell_qir: str) -> None:
+    """Pins what the ir-schema note claims: a wrong shape is accepted silently.
+
+    It changes the payload's content hash and nothing else, which is why the
+    note calls it part of the payload's identity rather than the circuit's.
+    """
+    canonical = json.loads(serialize(bell_qir, QIR_FORMAT)["ir_json"])
+    canonical["shape"] = [7]
+
+    wrong = analyze(json.dumps(canonical), IR_FORMAT)
+
+    assert wrong["circuit"]["n_qubits"] == 2
+    assert (
+        wrong["circuit"]["content_hash"] != analyze(bell_qir, QIR_FORMAT)["circuit"]["content_hash"]
+    )

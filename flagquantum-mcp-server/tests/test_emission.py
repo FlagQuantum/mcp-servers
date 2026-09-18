@@ -90,3 +90,84 @@ def test_oversized_emission_is_rejected(monkeypatch: pytest.MonkeyPatch, ghz3_qi
 
     with pytest.raises(ToolLimitError, match="above the 10-character limit"):
         emit_openqasm(ghz3_qir, "qir")
+
+
+# --- a value the target cannot express ---
+#
+# A complex angle is a legal IR value: the SDK encodes and decodes ``$complex``
+# itself. Neither text target can express it, and both emitters say so by
+# raising TypeError rather than ValueError. Left uncaught that reaches the
+# client as an unhandled exception instead of a structured error.
+
+
+def _complex_angled_ir() -> str:
+    """A one-gate IR whose angle is complex rather than real."""
+    return json.dumps(
+        {
+            "kind": "flagquantum.circuit_ir",
+            "version": "1.0",
+            "n_wires": 1,
+            "dtype": "complex64",
+            "shape": [2],
+            "instructions": [
+                {
+                    "opcode": "ry",
+                    "wires": [0],
+                    "params": {"theta": {"$complex": [1.0, 0.0]}},
+                    "matrix": None,
+                    "metadata": {},
+                }
+            ],
+            "observables": [],
+            "measurements": [],
+            "metadata": {},
+        }
+    )
+
+
+def test_openqasm_reports_an_inexpressible_value_as_an_input_error() -> None:
+    with pytest.raises(UnsupportedFormatError, match="OpenQASM cannot express"):
+        emit_openqasm(_complex_angled_ir(), "ir")
+
+
+def test_qcis_reports_an_inexpressible_value_as_an_input_error() -> None:
+    with pytest.raises(UnsupportedFormatError, match="QCIS cannot express"):
+        emit_qcis(_complex_angled_ir(), "ir")
+
+
+def test_the_refusal_names_the_value_rather_than_raising_bare() -> None:
+    with pytest.raises(UnsupportedFormatError, match="must be real"):
+        emit_openqasm(_complex_angled_ir(), "ir")
+
+
+# --- what the payload's content_hash identifies ---
+
+
+def test_openqasm_measures_every_wire_unless_told_otherwise(bell_qir: str) -> None:
+    """The default appends measurements the source circuit does not have.
+
+    Pinned because the result's ``content_hash`` is the *source* circuit's, so a
+    caller who reads the hash as identifying the emitted text is wrong. The
+    README and the tool description say so.
+    """
+    result = emit_openqasm(bell_qir, "qir")
+
+    assert "measure" in result["text"]
+    result_wires = emit_openqasm(bell_qir, "qir", result_wires=[0])
+    assert "measure q[1]" not in result_wires["text"]
+
+
+def test_the_emission_hash_identifies_the_source_circuit(bell_qir: str) -> None:
+    from flagquantum_mcp_server.analysis import analyze
+
+    emitted = emit_openqasm(bell_qir, "qir")
+
+    assert emitted["content_hash"] == analyze(bell_qir, "qir")["circuit"]["content_hash"]
+
+
+def test_qcis_appends_no_measurement(bell_qir: str) -> None:
+    """The asymmetry is deliberate: only the QASM emitters measure by default."""
+    text = emit_qcis(bell_qir, "qir")["text"]
+
+    assert text.strip()
+    assert "measure" not in text.lower()

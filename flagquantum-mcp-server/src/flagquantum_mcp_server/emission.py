@@ -86,6 +86,12 @@ def _emit(emit: Any, ir: Any, target: str, **kwargs: Any) -> str:
     this server, so the SDK's ``ValueError`` is re-raised as an input error with
     the gate named. Left alone it would reach the client as an internal error.
 
+    ``TypeError`` is caught for the same reason. A parameter value can be
+    perfectly legal IR and still be inexpressible in a text format — a complex
+    angle is the case in hand — and both emitters report that by raising
+    ``TypeError`` rather than ``ValueError``. The keyword arguments below are
+    fixed literals, so this cannot swallow a mistake of ours.
+
     Args:
         emit: The emitter function to call.
         ir: The circuit IR to emit.
@@ -102,7 +108,7 @@ def _emit(emit: Any, ir: Any, target: str, **kwargs: Any) -> str:
         return str(emit(ir, **kwargs))
     except NotImplementedError as exc:
         raise UnsupportedFormatError(f"{target} cannot express this circuit: {exc}") from exc
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise UnsupportedFormatError(f"{target} cannot express this circuit: {exc}") from exc
 
 

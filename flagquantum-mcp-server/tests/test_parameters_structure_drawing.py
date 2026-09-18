@@ -101,6 +101,60 @@ def test_an_unknown_value_is_named() -> None:
         bind_parameters(_parametric_ir(), {"theta": 0.5, "phi": 0.5}, "ir")
 
 
+# --- the symbol must survive whichever format carried it ---
+#
+# A gate list stores its parameters as plain values, so a ``$parameter`` marker
+# arriving that way used to be stored as an opaque dict: inspect said "not
+# parameterized" while serialization echoed the marker back, and the two tools
+# disagreed about the same circuit.
+
+
+def test_a_gate_list_carrying_a_marker_reports_its_symbol(angled_qir: str) -> None:
+    result = inspect_parameters(angled_qir, "qir")
+
+    assert result["is_parameterized"] is True
+    assert result["parameter_names"] == ["theta"]
+    assert result["occurrences"][0]["gate"] == "ry"
+
+
+def test_both_formats_bind_to_the_same_circuit(angled_qir: str) -> None:
+    """The same circuit has one content hash, not one per input format."""
+    from flagquantum_mcp_server.circuits import serialize
+
+    as_ir = serialize(angled_qir, "qir")["ir_json"]
+    from_qir = bind_parameters(angled_qir, {"theta": 0.7}, "qir")
+    from_ir = bind_parameters(as_ir, {"theta": 0.7}, "ir")
+
+    assert from_qir["content_hash"] == from_ir["content_hash"]
+    assert from_qir["after"] == from_ir["after"]
+
+
+def test_a_gate_list_carrying_a_marker_binds(angled_qir: str) -> None:
+    result = bind_parameters(angled_qir, {"theta": 0.7}, "qir")
+
+    assert result["is_parameterized"] is False
+    assert result["bound_parameters"] == {"theta": 0.7}
+
+
+def test_a_missing_binding_names_the_symbol_the_gate_list_carried(angled_qir: str) -> None:
+    """The symbol is live rather than echoed: binding treats it as a parameter."""
+    with pytest.raises(ToolInputError, match=r"Missing a value for \['theta'\]"):
+        bind_parameters(angled_qir, {}, "qir")
+
+
+def test_a_symbol_is_drawn_with_the_sdks_repr(angled_qir: str) -> None:
+    """Documents an SDK rough edge rather than working around it here.
+
+    ``Parameter`` defines no ``__str__``, so the drawer's ``str()`` falls through
+    to ``__repr__`` and the diagram reads ``RY(Parameter(name='theta'))``. The
+    tool description and README say so; if FlagQuantum adds ``__str__`` this
+    fails and they become wrong, which is the point of pinning it.
+    """
+    diagram = draw_circuit(angled_qir, "qir")["diagram"]
+
+    assert "Parameter(name='theta')" in diagram
+
+
 # --- layers ---
 
 

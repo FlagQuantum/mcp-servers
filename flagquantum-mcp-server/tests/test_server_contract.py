@@ -236,7 +236,7 @@ async def test_version_resource_reports_the_installed_sdk() -> None:
     assert payload["ir_version"] == fq.IR_VERSION
 
 
-async def test_ir_schema_resource_shows_a_working_example() -> None:
+async def test_the_ir_schema_resource_shows_a_working_example() -> None:
     result = await mcp.read_resource("flagquantum://ir-schema")
     payload = json.loads(result.contents[0].content)
 
@@ -244,6 +244,70 @@ async def test_ir_schema_resource_shows_a_working_example() -> None:
     assert payload["ir_version"] == payload["example"]["version"]
     assert len(payload["content_hash"]) == 64
     assert "opcode" in json.dumps(payload["example"])
+
+
+async def test_the_ir_schema_resource_shows_how_to_write_a_symbol() -> None:
+    """The marker was undocumented, so agents guessed and guessed wrong.
+
+    A hand-written string is the natural first attempt at a symbol, and the
+    resource said nothing either way. An agent session had to read the SDK
+    source to find the spelling, which no client of this server should need.
+    """
+    result = await mcp.read_resource("flagquantum://ir-schema")
+    payload = json.loads(result.contents[0].content)
+
+    assert "$parameter" in json.dumps(payload["parameter_example"])
+    assert "$parameter" in " ".join(payload["notes"])
+    assert "bare string" in " ".join(payload["notes"])
+
+
+# --- what a model can actually read ---
+#
+# FastMCP publishes only the docstring summary; ``Args:`` becomes the parameter
+# descriptions and ``Returns:`` is dropped entirely. So a fact written under
+# ``Returns:`` is invisible to every client — which is where the meaning of
+# wire_usage, the concurrency reading of a layer, and the QCIS matrix-gate
+# refusal all used to live. These assertions read the published description, not
+# the docstring, so moving a fact back into ``Returns:`` fails the build.
+
+
+@pytest.mark.parametrize(
+    ("tool", "phrase"),
+    [
+        ("analyze_circuit_tool", "wire_usage has one entry per wire"),
+        ("analyze_circuit_tool", "multi_qubit_gates counts"),
+        ("describe_layers_tool", "run concurrently"),
+        ("describe_topology_tool", "distance is the number of edges"),
+        ("emit_qcis_tool", "matrix gate"),
+        ("plan_execution_tool", "Nothing is executed"),
+        ("bind_parameters_tool", "no longer parameterized"),
+        ("emit_openqasm_tool", "measures every wire"),
+    ],
+)
+async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, phrase: str) -> None:
+    description = (await mcp.get_tool(tool)).description or ""
+
+    assert phrase in description, f"{tool} does not publish {phrase!r}"
+
+
+async def test_no_tool_hides_its_only_documentation_in_a_returns_section() -> None:
+    """A tool whose summary is one bare line is a tool documented nowhere."""
+    tools = await mcp.list_tools()
+
+    thin = [tool.name for tool in tools if len((tool.description or "").strip()) < 60]
+
+    assert thin == [], f"these tools publish no explanation: {thin}"
+
+
+async def test_the_documented_symbol_actually_parameterizes_a_circuit() -> None:
+    """Pins the example: written as the resource shows it, a symbol is a symbol."""
+    from flagquantum_mcp_server.parameters import inspect_parameters
+
+    result = await mcp.read_resource("flagquantum://ir-schema")
+    payload = json.loads(result.contents[0].content)
+    example = json.dumps(payload["parameter_example"])
+
+    assert inspect_parameters(example, "ir")["parameter_names"] == ["theta"]
 
 
 async def test_prompts_render_with_their_arguments() -> None:
