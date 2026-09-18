@@ -1,9 +1,13 @@
-"""Build an execution plan without running anything.
+"""Execution planning, and the output requests planning and execution share.
 
 ``fq.plan`` answers "what would this cost, on which device, in which mode, and
-does it fit in memory" without executing a program. That makes it the right
-planning tool for an agent that must decide before it commits, and it keeps
-this server free of any execution path.
+does it fit in memory" without executing a program, which is what an agent needs
+before it commits.
+
+This module also owns the translation from a caller's JSON output request into
+the SDK's own ``OutputRequest``, because planning and execution must read that
+JSON the same way. ``simulation`` calls the same builders rather than keeping a
+second opinion about what ``{"kind": "counts", "wires": [0]}`` means.
 
 Noise models are deliberately not exposed: a ``NoiseModel`` is a live SDK
 object rather than a serializable value, and every tool in this server takes
@@ -15,12 +19,23 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from flagquantum_mcp_server import limits
 from flagquantum_mcp_server._bridge import load_sdk
 from flagquantum_mcp_server.circuits import CircuitFormat, CircuitPayload, resolve_ir
-from flagquantum_mcp_server.errors import ToolInputError, UnsupportedFormatError
+from flagquantum_mcp_server.errors import (
+    ToolInputError,
+    ToolLimitError,
+    UnsupportedFormatError,
+)
 
 OUTPUT_KINDS: tuple[str, ...] = ("counts", "expectation", "probabilities", "samples")
 PAULI_LETTERS = frozenset("IXYZ")
+
+# Keys an expectation request accepts, and nothing else. An unknown key is a
+# caller who meant something the request cannot express, which is worth saying
+# rather than ignoring.
+EXPECTATION_KEYS = frozenset({"kind", "pauli", "terms", "name"})
+TERM_KEYS = frozenset({"pauli", "coefficient"})
 
 OPTION_FIELDS: tuple[str, ...] = (
     "mode",
@@ -199,14 +214,34 @@ def _build_output(spec: Mapping[str, Any], *, n_wires: int) -> Any:
         )
     name = spec.get("name")
     pauli = spec.get("pauli")
+    terms = spec.get("terms")
 
     if kind == "expectation":
-        if not isinstance(pauli, str):
-            raise ToolInputError(
-                "An 'expectation' output requires a 'pauli' string, for example "
-                "'ZZI' to measure Z on wires 0 and 1."
+        unknown = sorted(set(spec) - EXPECTATION_KEYS)
+        if unknown:
+            raise UnsupportedFormatError(
+                f"An 'expectation' output does not take {unknown}. It takes "
+                "'pauli' for one term, or 'terms' for several, plus an optional "
+                "'name'."
             )
-        return sdk.expectation(_pauli_observable(pauli, n_wires=n_wires), name=name)
+        if pauli is not None and terms is not None:
+            raise ToolInputError(
+                "An 'expectation' output takes either 'pauli' (one term) or "
+                "'terms' (several), not both. A Hamiltonian is a 'terms' list: "
+                '{"kind": "expectation", "terms": [{"pauli": "ZZ", '
+                '"coefficient": 1.0}, {"pauli": "XI", "coefficient": -0.5}]}.'
+            )
+        if terms is not None:
+            observable = _hamiltonian_observable(terms, n_wires=n_wires)
+        elif isinstance(pauli, str):
+            observable = _pauli_observable(pauli, n_wires=n_wires)
+        else:
+            raise ToolInputError(
+                "An 'expectation' output requires a 'pauli' string such as "
+                "'ZZI' to measure Z on wires 0 and 1, or a 'terms' list for a "
+                "weighted sum."
+            )
+        return sdk.expectation(observable, name=name)
 
     wires = _wires(spec.get("wires"), n_wires=n_wires)
     if kind == "counts":
@@ -216,12 +251,114 @@ def _build_output(spec: Mapping[str, Any], *, n_wires: int) -> Any:
     return sdk.samples(wires, name=name)
 
 
-def _pauli_observable(pauli: str, *, n_wires: int) -> Any:
+def _hamiltonian_observable(terms: Any, *, n_wires: int) -> Any:
+    """Build a weighted sum of Pauli strings from a ``terms`` list.
+
+    The SDK already evaluates a multi-term observable, returning one row per
+    term with its coefficient in the row's metadata, so this builder is the
+    whole of what was missing: a way to say "these terms" through JSON. It
+    deliberately does not add the rows up — that sum is the caller's, from
+    numbers the SDK produced, and inventing it here would be this server
+    reporting a value the SDK never computed.
+
+    Only ``+`` and scalar ``*`` on the SDK's public ``Z``/``X``/``Y`` builders
+    are used. The term type underneath is private, and naming it here would
+    make a private class part of this server's contract; the operators build it
+    without ever spelling it.
+
+    Args:
+        terms: A non-empty list of ``{"pauli": ..., "coefficient": ...}``
+            mappings. ``coefficient`` defaults to 1.0.
+        n_wires: Circuit width every term's Pauli string must match.
+
+    Returns:
+        A ``flagquantum.Observable``.
+
+    Raises:
+        ToolInputError: If the list, a term, a Pauli string, or a coefficient is
+            unusable.
+        ToolLimitError: If the list carries more terms than the bound allows.
+    """
+    if not isinstance(terms, Sequence) or isinstance(terms, (str, bytes, Mapping)):
+        raise ToolInputError(
+            f"'terms' is {type(terms).__name__}; it must be a list of objects "
+            'such as [{"pauli": "ZZ", "coefficient": 1.0}].'
+        )
+    if not terms:
+        raise ToolInputError(
+            "'terms' is empty. An expectation needs at least one term; for a "
+            "single unweighted term pass 'pauli' instead."
+        )
+    bound = limits.max_hamiltonian_terms()
+    if len(terms) > bound:
+        raise ToolLimitError(
+            f"This expectation carries {len(terms)} terms, past the {bound} one "
+            "request may ask for. FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS raises "
+            "the bound for a deployment that needs a larger operator."
+        )
+
+    total: Any = None
+    for position, term in enumerate(terms):
+        observable = _weighted_term(term, position, n_wires=n_wires)
+        total = observable if total is None else total + observable
+    return total
+
+
+def _weighted_term(term: Any, position: int, *, n_wires: int) -> Any:
+    """Build one weighted Pauli term, naming its position in every refusal."""
+    where = f"terms[{position}]"
+    if not isinstance(term, Mapping):
+        raise ToolInputError(
+            f"{where} is {type(term).__name__}; every term must be an object "
+            'such as {"pauli": "ZZ", "coefficient": 1.0}.'
+        )
+    unknown = sorted(set(term) - TERM_KEYS)
+    if unknown:
+        raise UnsupportedFormatError(
+            f"{where} does not take {unknown}. A term is "
+            '{"pauli": "ZZ", "coefficient": 1.0}, with the coefficient '
+            "optional."
+        )
+    pauli = term.get("pauli")
+    if not isinstance(pauli, str):
+        raise ToolInputError(
+            f"{where} has no 'pauli' string; every term needs one, such as "
+            '"ZZ" to measure Z on wires 0 and 1.'
+        )
+    coefficient = term.get("coefficient", 1.0)
+    if isinstance(coefficient, bool) or not isinstance(coefficient, (int, float)):
+        raise ToolInputError(
+            f"{where} has a coefficient that is {_name_of(coefficient)}; it "
+            "must be a real number. A symbol is not accepted here — the SDK "
+            "builds a parameter expression from one rather than an observable, "
+            "so it cannot be evaluated."
+        )
+    return _pauli_observable(pauli, n_wires=n_wires, where=where) * float(coefficient)
+
+
+def _name_of(value: Any) -> str:
+    """Name a rejected value the way the caller wrote it."""
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return f"a string ({value!r})"
+    if isinstance(value, bool):
+        return f"a boolean ({value!r})"
+    if isinstance(value, Mapping):
+        return f"an object ({dict(value)!r})"
+    if isinstance(value, (list, tuple)):
+        return f"a list ({list(value)!r})"
+    return f"the unsupported value {value!r}"
+
+
+def _pauli_observable(pauli: str, *, n_wires: int, where: str | None = None) -> Any:
     """Build an ``Observable`` from a Pauli string such as ``"ZZI"``.
 
     Args:
         pauli: One letter per wire, drawn from ``I``, ``X``, ``Y``, ``Z``.
         n_wires: Circuit width the string must match.
+        where: How to name the caller's location in a refusal, when this string
+            is one term of several rather than the whole request.
 
     Returns:
         A ``flagquantum.Observable``.
@@ -230,23 +367,25 @@ def _pauli_observable(pauli: str, *, n_wires: int) -> Any:
         ToolInputError: If the string is malformed, is entirely identity, or
             does not match the circuit width.
     """
+    subject = "Pauli string" if where is None else f"{where} 'pauli'"
     upper = pauli.upper()
     if len(upper) != n_wires:
         raise ToolInputError(
-            f"Pauli string {pauli!r} covers {len(upper)} wires, but the circuit has "
+            f"{subject} {pauli!r} covers {len(upper)} wires, but the circuit has "
             f"{n_wires}. One letter per wire is required."
         )
     bad = sorted(set(upper) - PAULI_LETTERS)
     if bad:
         raise ToolInputError(
-            f"Pauli string {pauli!r} contains unsupported letters {bad}; "
+            f"{subject} {pauli!r} contains unsupported letters {bad}; "
             f"use only {sorted(PAULI_LETTERS)}."
         )
     sdk = load_sdk()
     factors = [getattr(sdk, letter)(wire) for wire, letter in enumerate(upper) if letter != "I"]
     if not factors:
         raise ToolInputError(
-            f"Pauli string {pauli!r} is entirely identity, which is not a measurable observable."
+            f"{subject} {pauli!r} is entirely identity, which is not a measurable "
+            "observable. Drop the term, or name a wire it acts on."
         )
     observable = factors[0]
     for factor in factors[1:]:

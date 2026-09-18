@@ -300,6 +300,7 @@ them without a code change:
 | `FLAGQUANTUM_MCP_MAX_QASM_CHARS` | 1000000 | Emitted program size |
 | `FLAGQUANTUM_MCP_MAX_COMPARE_TOPOLOGIES` | 4 | Topologies per comparison |
 | `FLAGQUANTUM_MCP_MAX_RESPONSE_VALUES` | 65536 | Values one result may carry back |
+| `FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS` | 1024 | Pauli terms per expectation request |
 
 The last one is the only bound on what this server *returns* rather than what it
 accepts. A result travels into a model's context rather than into memory, and a
@@ -374,7 +375,7 @@ would produce a plausible-looking answer:
 | Input | Why it is refused |
 | --- | --- |
 | A circuit with unbound parameters | The SDK's refusal is `planned execution failed`, which names nothing. The message here names the parameters and points at `bind_parameters_tool` |
-| A circuit carrying `observables` | The default statevector path never reads the field, so the run would return no expectation value and no error either. Ask for an `expectation` output instead |
+| A circuit carrying `observables` | The default statevector path never reads the field, so the run would return no expectation value and no error either. Ask for the expectation directly with `pauli` or `terms` instead |
 | `outputs` alongside the circuit's own `measurements` | The SDK accepts one or the other, and says so in vocabulary that names neither field |
 
 The width where a full probability distribution stops being returnable is the
@@ -382,6 +383,37 @@ SDK's own contraction limit, and its message points at a setting this server
 does not expose. That refusal keeps the SDK's text and adds what a caller can
 actually do — name a few wires, or ask for `counts`, which report only the
 outcomes that occurred.
+
+### Measuring an energy
+
+`{"kind": "expectation", "pauli": "ZZ"}` evaluates one term. A Hamiltonian is a
+weighted sum, so it takes `terms` instead:
+
+```json
+{"kind": "expectation",
+ "terms": [{"pauli": "ZZZZ", "coefficient": 1.0},
+           {"pauli": "XIII", "coefficient": -1.0}]}
+```
+
+Each term comes back as **its own row**, carrying its `coefficient` and its
+value, because that is what the SDK computes — it evaluates the sum term by term
+and does not total it. So `⟨H⟩` is the caller's arithmetic:
+
+```python
+energy = sum(row["coefficient"] * row["value"][0] for row in rows)
+```
+
+That is deliberate rather than convenient. A total computed here would be a
+number the SDK never produced and this server could not attribute, and the
+per-term rows are what make the result auditable — you can see which term
+dominated. `coefficient` appears only on rows the SDK put one on, which means
+the terms of a weighted expectation.
+
+A coefficient must be a real number. A **symbol** is refused: `Z(0) * Parameter`
+builds a parameter expression rather than an observable, so there is nothing to
+evaluate — bind the circuit's gates first instead. A single unweighted term is
+still spelled `"pauli": "ZZ"`, and the two spellings are one code path, so they
+cannot drift apart.
 
 ## Which contracts this rests on
 

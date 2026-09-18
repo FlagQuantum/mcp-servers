@@ -130,12 +130,14 @@ def _reject_circuit_observables(ir: Any) -> None:
     if not observables:
         return
     raise ToolInputError(
-        f"This circuit carries {len(observables)} observable(s), and a local "
-        "simulation does not evaluate them: the default statevector path never "
-        "reads the field, so the result would carry no expectation value and no "
-        "error either. Ask for the expectation directly instead — pass "
-        'outputs=[{"kind": "expectation", "pauli": "ZZ"}] with one letter per '
-        "wire, or omit the observables from the circuit."
+        f"This circuit's 'observables' field carries {len(observables)} "
+        "entr(ies), and a local simulation does not evaluate them: the default "
+        "statevector path never reads the field, so the result would carry no "
+        "expectation value and no error either. Ask for the expectation "
+        'directly instead — pass outputs=[{"kind": "expectation", '
+        '"pauli": "ZZ"}] for a single term, or a \'terms\' list of '
+        '{"pauli": ..., "coefficient": ...} objects to measure a weighted '
+        "sum in one call, or drop the field from the circuit."
     )
 
 
@@ -234,13 +236,24 @@ def _resolve_request(
 
 
 def _measurement(item: Any) -> dict[str, Any]:
-    """Render one SDK measurement result as JSON."""
-    return {
+    """Render one SDK measurement result as JSON.
+
+    ``coefficient`` appears only on rows the SDK put one on, which means the
+    terms of a weighted expectation. It is carried through because it is half
+    of what a caller needs to reconstruct an energy — the SDK reports one row
+    per term and does not total them — and dropping it here would leave the
+    other half unusable.
+    """
+    rendered = {
         "kind": str(item.kind),
         "wires": [int(wire) for wire in item.wires],
         "shots": None if item.shots is None else int(item.shots),
         "value": _plain(item.value),
     }
+    coefficient = dict(item.metadata or {}).get("fq_coefficient")
+    if coefficient is not None:
+        rendered["coefficient"] = float(coefficient)
+    return rendered
 
 
 def _enforce_response_cap(resolved: Sequence[Mapping[str, Any]]) -> None:

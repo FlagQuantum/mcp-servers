@@ -17,6 +17,7 @@ DEFAULT_MAX_IR_BYTES = 262_144
 DEFAULT_MAX_QASM_CHARS = 1_000_000
 DEFAULT_MAX_COMPARE_TOPOLOGIES = 4
 DEFAULT_MAX_RESPONSE_VALUES = 65_536
+DEFAULT_MAX_HAMILTONIAN_TERMS = 1024
 
 
 def _positive_int(name: str, default: int) -> int:
@@ -75,3 +76,15 @@ def max_response_values() -> int:
     ``counts`` result over the same circuit is unaffected.
     """
     return _positive_int("FLAGQUANTUM_MCP_MAX_RESPONSE_VALUES", DEFAULT_MAX_RESPONSE_VALUES)
+
+
+def max_hamiltonian_terms() -> int:
+    """Return how many Pauli terms one expectation request may carry.
+
+    An expectation over a weighted sum reports one row per term, so the terms a
+    caller writes are the rows it gets back. Evaluating a few thousand terms is
+    cheap — measured at under a third of a second for 2000 on a four-qubit
+    circuit — so this bound is about the answer rather than the work: past it
+    the response stops being something a model can read.
+    """
+    return _positive_int("FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS", DEFAULT_MAX_HAMILTONIAN_TERMS)

@@ -146,6 +146,22 @@ async def test_a_failure_returns_the_error_envelope_not_an_exception() -> None:
     assert result.structured_content["error"]["code"] == "INVALID_INPUT"
 
 
+async def test_the_outputs_argument_documents_named_pauli_sums() -> None:
+    """The place a caller reads when writing an expectation request.
+
+    FastMCP publishes a tool's summary *and* its ``Args:`` section — the latter
+    as each parameter's JSON-schema description. ``Returns:`` is dropped, which
+    is why the fact is asserted here rather than in the summary: a caller
+    assembling ``outputs`` reads the ``outputs`` parameter, and a Hamiltonian
+    it cannot discover is a Hamiltonian it will not pass.
+    """
+    for tool in ("simulate_circuit_tool", "plan_execution_tool"):
+        description = (await mcp.get_tool(tool)).parameters["properties"]["outputs"]["description"]
+
+        assert "'terms'" in description or '"terms"' in description, tool
+        assert "coefficient" in description, tool
+
+
 OVERSIZED = "[" + "1," * 400_000 + "1]"
 
 

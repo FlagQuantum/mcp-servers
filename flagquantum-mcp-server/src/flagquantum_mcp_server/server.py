@@ -384,7 +384,12 @@ def plan_execution_tool(
             allow_backend_fallback.
         outputs: Requested outputs; each has a "kind" of "counts",
             "expectation", "probabilities" or "samples", plus either a "wires"
-            list or, for "expectation", a "pauli" string such as "ZZI".
+            list or, for "expectation", a "pauli" string such as "ZZI". For a
+            weighted sum—a Hamiltonian—give "terms" instead of "pauli":
+            {"kind": "expectation", "terms": [{"pauli": "ZZ", "coefficient":
+            1.0}, {"pauli": "XI", "coefficient": -0.5}]}. Each term comes back
+            as its own row carrying its "coefficient", and the total is the
+            caller's to add.
 
     Returns:
         The resolved execution contract (mode, backend, device, precision) and
@@ -439,7 +444,12 @@ def simulate_circuit_tool(
             "samples" outputs.
         outputs: Requested outputs; each has a "kind" of "counts",
             "expectation", "probabilities" or "samples", plus either a "wires"
-            list or, for "expectation", a "pauli" string such as "ZZI".
+            list or, for "expectation", a "pauli" string such as "ZZI". For a
+            weighted sum—a Hamiltonian—give "terms" instead of "pauli":
+            {"kind": "expectation", "terms": [{"pauli": "ZZ", "coefficient":
+            1.0}, {"pauli": "XI", "coefficient": -0.5}]}. Each term comes back
+            as its own row carrying its "coefficient", and the total is the
+            caller's to add.
 
     Returns:
         The resolved outputs — each with its kind, wires, shots and value — and
@@ -726,7 +736,12 @@ def ir_schema_resource() -> dict[str, Any]:
             (
                 "An observable's 'coefficient' may be a symbol written "
                 '{"$parameter": "<name>"}, so a Hamiltonian term carries a '
-                "variational weight the same way a gate angle does."
+                "variational weight the same way a gate angle does. A local run "
+                "does not evaluate this field: the default statevector path "
+                "reads a circuit's 'measurements' but not its 'observables', so "
+                "an expectation value is asked for through the executing tool's "
+                "'outputs' instead — 'pauli' for one term, or a 'terms' list "
+                "for a weighted sum."
             ),
             (
                 "Every payload also carries 'dtype' and 'shape'. The SDK writes "
