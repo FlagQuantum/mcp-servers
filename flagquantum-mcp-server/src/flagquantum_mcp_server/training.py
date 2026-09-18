@@ -54,7 +54,11 @@ from flagquantum_mcp_server.circuits import (
     circuit_from_ir,
     resolve_ir,
 )
-from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
+from flagquantum_mcp_server.errors import (
+    ToolInputError,
+    ToolLimitError,
+    UnsupportedFormatError,
+)
 from flagquantum_mcp_server.planning import validate_pauli_terms
 from flagquantum_mcp_server.preconditions import (
     SDK_FAILURE_BASES,
@@ -186,6 +190,8 @@ def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
     """
     try:
         return hamiltonian_from_terms(hamiltonian, n_wires=n_wires)
+    except UnsupportedFormatError as exc:
+        raise UnsupportedFormatError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolLimitError as exc:
         raise ToolLimitError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolInputError as exc:
@@ -201,19 +207,27 @@ def _in_this_tools_vocabulary(message: str) -> str:
     ``hamiltonian`` and an objective, so every one of those nouns names something
     they never typed. The refusals themselves are unchanged; only the nouns move.
 
-    **Four shapes, not one, and that was not obvious.** The first version of this
-    replaced ``'terms'`` alone — the quoted field name. Every *term-level*
-    message says ``terms[0]`` unquoted, and those are the majority, because a
-    malformed term is the common case. Measured: the field-level pair were
-    renamed and all six term-level refusals still said ``terms``.
+    **Every message this reaches was measured.** The validator raises eight
+    malformed-input refusals plus the bound's; they open with ``'terms' is ...``
+    (twice), ``terms[0] ...`` (five times), ``An expectation needs ...`` and
+    ``This expectation carries ...``. The four edits below cover all four
+    openings, and a test asserts the property over all eight shapes rather than
+    trusting the list.
 
-    **The two phrases are named, not replaced wholesale.** A blanket
+    **The field name is anchored to the start of the message, and that is not
+    cosmetic.** The validator quotes its own field name — ``'terms' is NoneType``
+    — and it also quotes the caller's offending value back at them: ``has a
+    coefficient that is a string ('terms')``. A caller who passes the literal
+    string ``terms`` produces a message containing *both*, and an unanchored
+    replace cannot tell them apart. Measured, the unanchored version answered
+    ``('hamiltonian')`` — the caller's own value rewritten, in the message whose
+    entire job is to tell them what was wrong with it. Anchoring removes that
+    case. A literal containing ``terms[`` is still echoed renamed; that residual
+    is pinned by a test rather than left to be discovered.
+
+    The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
-    ``expectation`` *output*, which is the one place the word is correct. This
-    function only ever runs on the training path, so that cannot happen today —
-    but a phrase list that says what it covers is auditable and a blanket replace
-    is not. If the validator gains a fifth shape, add it here; the property test
-    below is what will notice.
+    ``expectation`` *output*, which is the one place the word is correct.
 
     Args:
         message: A refusal's text, from the shared validator.
@@ -221,9 +235,10 @@ def _in_this_tools_vocabulary(message: str) -> str:
     Returns:
         The same refusal, in this tool's nouns.
     """
+    if message.startswith("'terms'"):
+        message = "'hamiltonian'" + message[len("'terms'") :]
     return (
-        message.replace("'terms'", "'hamiltonian'")
-        .replace("terms[", "hamiltonian[")
+        message.replace("terms[", "hamiltonian[")
         .replace("An expectation needs", "An objective needs")
         .replace("This expectation carries", "This objective carries")
     )

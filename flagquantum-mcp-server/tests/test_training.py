@@ -27,7 +27,11 @@ from typing import Any
 
 import pytest
 
-from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
+from flagquantum_mcp_server.errors import (
+    ToolInputError,
+    ToolLimitError,
+    UnsupportedFormatError,
+)
 from flagquantum_mcp_server.training import parameter_names, replay_builder
 
 pytestmark = pytest.mark.unit
@@ -863,3 +867,44 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
     assert caught.value.code == "LIMIT_EXCEEDED"
     assert "expectation" not in str(caught.value)
     assert "objective" in str(caught.value)
+
+
+def test_an_unsupported_key_still_reports_as_a_format_problem() -> None:
+    """The same collapse that hit the bound hits this code, and nothing noticed.
+
+    ``UnsupportedFormatError`` subclasses ``ToolInputError``, so a bare
+    ``except ToolInputError`` catches it and re-raises the base class. Measured
+    before the fix: an unknown key in a term came back as ``INVALID_INPUT``
+    where the validator had raised ``UNSUPPORTED_FORMAT``. The property test
+    above passes either way, because it asserts prose — which is exactly why
+    this test asserts the code.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(UnsupportedFormatError) as caught:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": 1.0, "extra": 1}], "qir", steps=1)
+
+    assert caught.value.code == "UNSUPPORTED_FORMAT"
+
+
+def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
+    """The rename touches the validator's nouns, never the caller's value.
+
+    A refusal quotes the offending value back: ``has a coefficient that is a
+    string ('terms')``. Renaming the field name ``terms`` therefore has a message
+    in which the SDK's word and a caller's literal are the same six characters,
+    and an unanchored replace answers ``('hamiltonian')`` — the caller's own
+    value rewritten, in the message whose job is to explain it. Measured.
+
+    A literal containing ``terms[`` is still echoed renamed; that is the residual
+    this test records rather than claims away.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": "terms"}], "qir", steps=1)
+
+    message = str(caught.value)
+    assert "('terms')" in message, message
+    assert "('hamiltonian')" not in message, message
+    assert "hamiltonian[0]" in message, message
