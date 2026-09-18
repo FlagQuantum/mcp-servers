@@ -3500,10 +3500,11 @@ Expected: all pass.
 
 ```bash
 ../.venv/bin/python -m build
-python3 -m venv /tmp/wheelcheck
-/tmp/wheelcheck/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-/tmp/wheelcheck/bin/python -m pip install dist/*.whl
-/tmp/wheelcheck/bin/python -c "
+WHEELCHECK="$(mktemp -d)"
+python3 -m venv "$WHEELCHECK"
+"$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+"$WHEELCHECK/bin/python" -m pip install dist/*.whl
+"$WHEELCHECK/bin/python" -c "
 import asyncio
 from fastmcp import Client
 from flagquantum_mcp_server.server import mcp
@@ -3515,8 +3516,19 @@ async def main():
 
 asyncio.run(main())
 "
-/tmp/wheelcheck/bin/python -c "import pytest"   # must FAIL
+"$WHEELCHECK/bin/python" -c "import pytest"   # must FAIL
 ```
+
+**`mktemp -d`, not a fixed path.** The rule this step exists to satisfy is that a
+check on the artifact must run in the environment the artifact will have — "when
+a step needs an environment, build that environment rather than borrowing the one
+that is already warm". A fixed `/tmp/wheelcheck` does not build one: measured on
+this machine, that path already existed from an earlier rehearsal, holding
+`flagquantum` 0.2.0. `python3 -m venv` on an existing directory reuses it rather
+than refusing, so the install would be an upgrade over a warm tree and the
+`import pytest` line below would be asserting about whatever the previous run
+left behind. A fresh temporary directory makes the claim true by construction and
+deletes nothing.
 
 Expected: the tool list includes `train_parameters_tool`, and the `import pytest` line fails — that is the check that the artifact does not depend on the test framework, which is the one the 0.2.0 release got wrong.
 
@@ -3674,7 +3686,9 @@ And in the tier table's third row, extending the existing list:
 
 - [ ] **Step 4: Update `AGENTS.md`**
 
-Extend rule 4's in-process paragraph so it covers the tool that trains as well as the one that simulates, and add the training budget to the Verification section's environment list. Specifically, after the existing `simulate_circuit_tool` paragraph, add:
+Three edits to `AGENTS.md`.
+
+**First, rule 4's in-process paragraph**, so it covers the tool that trains as well as the one that simulates. After the existing `simulate_circuit_tool` paragraph, add:
 
 ```markdown
    `train_parameters_tool` is inside the same line. The gradients it uses are
@@ -3699,6 +3713,24 @@ And in the Conventions section, after the prompt-channel paragraph, add:
   asserts the Hamiltonian reaches the objective. When a public API takes an
   argument it does not act on, assume the same shape elsewhere: find the second
   object that decides, and set it.
+```
+
+**Third, the wheel rehearsal's environment**, in the Verification section. Its
+example uses a fixed `/tmp/wheelcheck`, which does not build an environment — it
+reuses whatever is there. Measured on this machine: that path already existed
+from an earlier rehearsal, holding `flagquantum` 0.2.0, and `python3 -m venv` on
+an existing directory reuses it rather than refusing. So the `import pytest` line
+underneath it asserts about the previous run's tree, in the section whose own
+words are "when a step needs an environment, build that environment rather than
+borrowing the one that is already warm". Replace the fixed path with a fresh
+temporary directory:
+
+```bash
+WHEELCHECK="$(mktemp -d)"
+python3 -m venv "$WHEELCHECK"
+"$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+"$WHEELCHECK/bin/python" -m pip install dist/*.whl
+"$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
 ```
 
 - [ ] **Step 5: Check the documented commands still all resolve**
