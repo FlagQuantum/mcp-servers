@@ -198,6 +198,7 @@ def test_the_installed_sdk_has_no_mcp_dependency() -> None:
 def test_the_training_budget_is_read_per_call(monkeypatch: pytest.MonkeyPatch) -> None:
     from flagquantum_mcp_server import limits
 
+    monkeypatch.delenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", raising=False)
     assert limits.max_train_seconds() == 60
     monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "5")
 
@@ -225,3 +226,31 @@ def test_torch_is_reached_lazily_and_is_not_a_declared_dependency() -> None:
     declared = " ".join(requires("flagquantum-mcp-server") or ()).lower()
 
     assert "torch" not in declared
+
+
+def test_importing_the_server_does_not_pull_in_torch() -> None:
+    """The laziness is a startup cost, not a style preference.
+
+    ``_bridge`` binds both the SDK and torch on first use because the server
+    must not be expensive to import. Measured, importing torch costs 0.66 s of
+    cumulative import time, and every MCP client pays a server's import cost
+    before it can list a tool.
+
+    Asserted in a subprocess because this test process has torch loaded by
+    then: the modules other tests import would mask an eager import here, and
+    a check that cannot fail is not a check.
+    """
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys; import flagquantum_mcp_server.server; "
+        "assert 'torch' not in sys.modules, sorted("
+        "m for m in sys.modules if m.startswith('torch'))"
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, timeout=120, check=False
+    )
+
+    assert completed.returncode == 0, completed.stderr
