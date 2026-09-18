@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 
 import pytest
 
@@ -662,3 +663,128 @@ def test_every_rejection_message_is_substantial() -> None:
     for message in _every_rejection_message():
         assert len(message) > 60, message
         assert message[0].isupper(), message
+
+
+# --- the systematic sweep ---
+#
+# Everything above was found by hand, one probe at a time, and each pass found
+# only what the probe happened to aim at. This is the same search written down:
+# every field of the envelope, and of an instruction, crossed with every JSON
+# value kind. A payload may be accepted (some are legal) or refused — what it
+# may never do is leave as an unhandled exception, because the server promises
+# a structured envelope and a raw `AttributeError` from inside a library breaks
+# that promise and reads as a bug here rather than a mistake by the caller.
+
+
+JSON_VALUES: dict[str, object] = {
+    "string": "x",
+    "integer": 1,
+    "float": 1.5,
+    "boolean": True,
+    "null": None,
+    "empty-list": [],
+    "empty-object": {},
+    "list-of-strings": ["x"],
+    "object-of-strings": {"a": 1},
+}
+
+ENVELOPE_FIELDS = [
+    "kind",
+    "version",
+    "n_wires",
+    "dtype",
+    "shape",
+    "instructions",
+    "observables",
+    "measurements",
+    "metadata",
+]
+
+INSTRUCTION_FIELDS = ["opcode", "wires", "params", "matrix", "metadata"]
+
+# The calls the sweep makes: a circuit payload reaching each kind of reader.
+READERS = [
+    ("analyze", analyze, lambda payload: {"circuit": payload, "circuit_format": "ir"}),
+    (
+        "serialize",
+        serialize,
+        lambda payload: {"circuit": payload, "circuit_format": "ir"},
+    ),
+    (
+        "deserialize",
+        deserialize,
+        lambda payload: {"ir_json": payload},
+    ),
+]
+
+
+def _envelope(**overrides: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "kind": "flagquantum.circuit_ir",
+        "version": "1.0",
+        "n_wires": 2,
+        "dtype": "complex64",
+        "shape": [4],
+        "instructions": [
+            {"opcode": "h", "wires": [0], "params": {}, "matrix": None, "metadata": {}}
+        ],
+        "observables": [],
+        "measurements": [],
+        "metadata": {},
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _swept_payloads() -> list[tuple[str, dict[str, object]]]:
+    """Every field crossed with every JSON value kind."""
+    payloads: list[tuple[str, dict[str, object]]] = []
+    for field in ENVELOPE_FIELDS:
+        for kind, value in JSON_VALUES.items():
+            payloads.append((f"{field}={kind}", _envelope(**{field: value})))
+    for field in INSTRUCTION_FIELDS:
+        for kind, value in JSON_VALUES.items():
+            instruction = {
+                "opcode": "h",
+                "wires": [0],
+                "params": {},
+                "matrix": None,
+                "metadata": {},
+            }
+            instruction[field] = value
+            payloads.append(
+                (f"instructions[0].{field}={kind}", _envelope(instructions=[instruction]))
+            )
+    return payloads
+
+
+def _assert_structured(
+    reader_name: str,
+    reader: Callable[..., object],
+    arguments: Callable[[str], dict[str, object]],
+    payload: dict[str, object],
+) -> None:
+    """Refuse anything but the two structured error types.
+
+    Pulled out of the loop so the ``except Exception`` is not written inside one
+    — catching everything is the whole point of the test, not an oversight, and
+    keeping it in a helper keeps that legible.
+    """
+    try:
+        reader(**arguments(json.dumps(payload)))
+    except (ToolInputError, ToolLimitError):
+        return
+    except Exception as exc:
+        raise AssertionError(
+            f"{reader_name} raised {type(exc).__name__} instead of a structured error: {exc}"
+        ) from exc
+
+
+@pytest.mark.parametrize(("label", "payload"), _swept_payloads(), ids=lambda v: str(v)[:60])
+def test_no_payload_escapes_as_an_unhandled_exception(
+    label: str, payload: dict[str, object]
+) -> None:
+    del label  # carried by the parametrize id, which is what a failure prints
+
+    for reader_name, reader, arguments in READERS:
+        _assert_structured(reader_name, reader, arguments, payload)
