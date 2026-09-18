@@ -3045,6 +3045,31 @@ def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
     assert "hamiltonian[0]" in message, message
 
 
+def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> None:
+    """The one input the rename still gets wrong, written down as a test.
+
+    ``terms[`` is anchored to nothing: it is the SDK's noun inside
+    ``terms[0] has no 'pauli' string``, and it appears mid-message, so there is
+    no position to anchor it to. A caller whose own value is the literal string
+    ``terms[`` therefore has it echoed back as ``hamiltonian[`` — the same defect
+    the anchor fixed for the other shape, one step further out.
+
+    This asserts the defective behaviour on purpose. It is here so the residual
+    is a fact in the suite rather than a sentence in a docstring, and so that
+    anyone who fixes it gets a red test telling them what changed. Measured
+    wording; if the rename is ever rebuilt to take the noun as a parameter
+    instead of substituting text, this test is what should be deleted.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [{"pauli": "terms[", "coefficient": 1.0}], "qir", steps=1)
+
+    message = str(caught.value)
+    assert "'hamiltonian['" in message, message
+    assert "terms[0]" in message, message
+
+
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3080,8 +3105,8 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds twelve tests; read the count off the output and
-check the def count rose by twelve. (Three of the refusals it would otherwise add
+Expected: PASS. This step adds thirteen tests; read the count off the output and
+check the def count rose by thirteen. (Three of the refusals it would otherwise add
 are already in the file, shipped with Task 7 — see the note at the top of this
 task. One of the ten is parametrized, so the collected count rises by more than
 the def count; that is what Step 3 of Task 7 saw too.)
