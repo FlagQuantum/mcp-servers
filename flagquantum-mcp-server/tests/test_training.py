@@ -64,8 +64,16 @@ def _numeric(value: Any) -> float:
 # --- the replay reproduces the circuit it was given ---
 
 
-def test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit() -> None:
-    """The strongest statement available: serialize the rebuild, compare."""
+def test_a_replay_of_a_numeric_circuit_reproduces_its_instructions() -> None:
+    """Byte-equality of the instruction list, which is what the replay rebuilds.
+
+    Not byte-equality of the whole envelope: the replay reproduces the
+    instructions and the width, and every other envelope field — ``dtype``,
+    ``shape``, ``metadata`` — comes from a freshly default-constructed
+    ``Circuit``. A ``dtype="complex128"`` source is equal in instructions and
+    unequal in envelope, so the wider assertion would only pass on a source that
+    happens to be default-constructed too.
+    """
     import flagquantum as fq
 
     source = fq.Circuit(2).h(0).ry(1, theta=0.7).cx(0, 1)
@@ -75,7 +83,59 @@ def test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit() -> No
 
     rebuilt = replay_builder(ir)({})
 
-    assert rebuilt.to_ir().to_dict() == ir.to_dict()
+    assert rebuilt.to_ir().to_dict()["instructions"] == ir.to_dict()["instructions"]
+
+
+def test_a_replayed_circuit_executes_and_agrees_with_its_source() -> None:
+    """The claim byte-equality cannot make: the rebuild runs, and runs the same.
+
+    Measured before this test existed: a replay built from ``to_dict()`` was
+    byte-for-byte equal to its source on this same circuit and failed to
+    execute. Serializing correctly is not the property that matters — producing
+    the same numbers is, and only running it shows that.
+    """
+    import flagquantum as fq
+
+    source = fq.Circuit(2).h(0).ry(1, theta=0.7).cx(0, 1)
+    source.gate("any", [1], matrix=[[1, 0], [0, 1j]])
+    ir = source.to_ir()
+
+    rebuilt = replay_builder(ir)({})
+
+    want = fq.run(source, outputs=[fq.probabilities([0, 1])]).measurements[0].value
+    got = fq.run(rebuilt, outputs=[fq.probabilities([0, 1])]).measurements[0].value
+    assert got == pytest.approx(want, abs=1e-9)
+
+
+def test_a_parameter_inside_an_expression_is_substituted() -> None:
+    """A name that appears only inside an expression is still a name to train.
+
+    ``parameter_names`` reports it either way, so the failure is silent until
+    the run: the tool would offer a trainable group it never applies.
+    """
+    import torch
+
+    qir = json.dumps(
+        [
+            {"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "t0"}}},
+            {
+                "name": "rz",
+                "index": [1],
+                "parameters": {
+                    "theta": {"$expression": {"op": "mul", "args": [2.0, {"$parameter": "t1"}]}}
+                },
+            },
+        ]
+    )
+    ir = _ir(qir)
+    assert parameter_names(ir) == ("t0", "t1")
+
+    built = replay_builder(ir)({"t0": torch.tensor([0.3]), "t1": torch.tensor([0.4])})
+
+    assert built.is_parameterized() is False, "the rebuild still carries symbols"
+    assert _numeric(built.to_ir().to_dict()["instructions"][1]["params"]["theta"]) == pytest.approx(
+        0.8
+    )
 
 
 def test_a_matrix_gate_survives_the_replay() -> None:

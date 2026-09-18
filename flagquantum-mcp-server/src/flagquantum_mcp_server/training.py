@@ -3,12 +3,19 @@
 ``fq.Module`` and ``fq.train`` want a Python callable rather than JSON, which
 looks like a dead end for a server whose every input is JSON. It is not: a
 serialized circuit carries every instruction it was built from, and
-``Circuit.gate`` is the single primitive that rebuilds them — built-in gates,
-arbitrary matrices and channels all go through it. So the replay below is a loop
-and not a gate table, and it carries no numerical logic. It translates a
-serialized circuit into the callable shape the SDK asks for, and nothing else.
+``Circuit.gate`` is the single primitive that rebuilds them — built-in gates and
+arbitrary matrices both go through it. So the replay below is a loop and not a
+gate table, and it carries no numerical logic. It translates a serialized circuit
+into the callable shape the SDK asks for, and nothing else.
 
-Three facts about the SDK shape this module, all measured rather than read:
+A channel is the one instruction it does not rebuild faithfully. Flagging an
+instruction as a channel is ``instruction.metadata["is_channel"]``, and
+``Circuit.gate`` takes no ``metadata``, so the flag cannot be carried. Measured,
+the consequence is smaller than it sounds: a channel circuit fails ``fq.run`` on
+this path both before and after the replay, so no number a caller sees changes —
+but the replay is not faithful there and this docstring will not claim it is.
+
+Four facts about the SDK shape this module, all measured rather than read:
 
 * ``Module(hamiltonian=H)`` stores ``H`` and does not evaluate it. Which
   observable a module measures comes from its ``RuntimePolicy``, whose default is
@@ -19,9 +26,15 @@ Three facts about the SDK shape this module, all measured rather than read:
   Python API it is stored as an opaque dict and the circuit reports itself as
   unparameterized, which is the silent failure ``circuits.py`` already refuses at
   the JSON boundary. Names are therefore read through ``circuit_from_ir``, which
-  decodes the markers properly.
+  decodes the markers properly. The same trap covers the instruction list itself:
+  see ``replay_builder``, which reads the IR's live objects and never
+  ``to_dict()``.
 * ``Circuit.gate`` takes its arguments as a ``params=`` mapping, not
   positionally, and the argument names are the SDK's own gate manifest.
+* A parameter can also sit inside a ``ParameterExpression`` — ``2.0 * t0``.
+  ``parameter_names`` reports the name either way, so a replay that substitutes
+  only a top-level ``Parameter`` advertises a trainable group it never applies,
+  and stays byte-equal to its source while doing it.
 
 Training is the only operation here whose cost is not bounded by the size of its
 input, so a prediction decides before any work starts. See ``predict_seconds``.
@@ -34,10 +47,6 @@ from typing import Any
 
 from flagquantum_mcp_server._bridge import load_sdk
 from flagquantum_mcp_server.circuits import circuit_from_ir
-
-# The one Python name a parameter value may travel under when it is a symbol
-# rather than a number. Its presence is what makes the argument a tensor.
-PARAMETER_MARKER = "$parameter"
 
 
 def parameter_names(ir: Any) -> tuple[str, ...]:
@@ -61,10 +70,19 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     """Return the callable ``fq.Module`` traces, rebuilding this circuit.
 
     The returned builder takes the parameter mapping ``Module`` hands it — one
-    one-element tensor per name — and returns a live ``Circuit``. Instructions
-    are read from ``ir.to_dict()``, where a ``Parameter`` has become the marker a
-    caller sees over the wire, rather than from the live objects, whose ``params``
-    hold SDK types a JSON tool has no business inspecting.
+    one-element tensor per name — and returns a live ``Circuit``.
+
+    Instructions come from the IR's own ``instructions``, not from
+    ``to_dict()``. The two differ in a way that is easy to miss and was
+    measured: ``to_dict()`` runs every value through the SDK's encoder, turning
+    a parameter into a ``{"$parameter": ...}`` marker, a complex into
+    ``{"$complex": [...]}`` and a matrix's entries the same way. Handing those
+    encodings back to ``Circuit.gate`` builds a circuit that serializes
+    byte-for-byte like the original and cannot execute — ``fq.run`` refuses it
+    with ``planned execution failed`` while the source runs normally. The live
+    objects are ``Parameter``, ``ParameterExpression`` and real matrices, which
+    is what the builder needs and what a JSON tool has no reason to reassemble
+    from markers.
 
     Args:
         ir: A validated ``CircuitIR``.
@@ -72,47 +90,54 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     Returns:
         A callable taking ``{name: tensor}`` and returning a ``Circuit``.
     """
-    instructions = tuple(ir.to_dict()["instructions"])
+    instructions = tuple(ir.instructions)
     n_wires = int(ir.n_wires)
 
     def build(parameters: Mapping[str, Any]) -> Any:
-        circuit = load_sdk().Circuit(n_wires)
+        sdk = load_sdk()
+        circuit = sdk.Circuit(n_wires)
         for instruction in instructions:
             arguments = {
-                str(key): _argument(value, parameters)
-                for key, value in (instruction.get("params") or {}).items()
+                str(key): _argument(value, parameters, sdk)
+                for key, value in instruction.params.items()
             }
             circuit.gate(
-                str(instruction["opcode"]),
-                [int(wire) for wire in instruction["wires"]],
+                str(instruction.name),
+                [int(wire) for wire in instruction.wires],
                 params=arguments or None,
-                matrix=instruction.get("matrix"),
+                matrix=instruction.matrix,
             )
         return circuit
 
     return build
 
 
-def _argument(value: Any, parameters: Mapping[str, Any]) -> Any:
-    """Resolve one serialized gate argument against the parameter mapping.
+def _argument(value: Any, parameters: Mapping[str, Any], sdk: Any) -> Any:
+    """Resolve one live gate argument against the parameter mapping.
 
-    A symbol becomes the tensor ``Module`` supplied for that name. Every other
-    value — a bound number, a ``$tensor``, a ``$complex``, a ``$expression`` —
-    passes through untouched, because the SDK's own decoder built it and this
-    module has no business reinterpreting it.
+    A ``Parameter`` becomes the tensor ``Module`` supplied for that name. A
+    ``ParameterExpression`` — ``2.0 * t0`` — is resolved through the SDK's own
+    public ``bind``, so the arithmetic stays the SDK's rather than being
+    reimplemented here; this module carries no numerical logic and should not
+    acquire any.
+
+    Every other value is already a number, a complex or an object the SDK built,
+    and passes through untouched.
 
     ``[0]`` indexes the one-element group ``Module`` creates per name. A group of
     any other size would be a name bound to a vector, which this tool never asks
-    for.
+    for; the assertion that it is one element belongs at the construction site.
 
     Args:
-        value: The serialized argument.
+        value: The live argument from an instruction.
         parameters: The mapping ``Module`` handed the builder.
+        sdk: The loaded ``flagquantum`` module, for the two type checks.
 
     Returns:
         The argument to pass to ``Circuit.gate``.
     """
-    symbol = value.get(PARAMETER_MARKER) if isinstance(value, Mapping) else None
-    if isinstance(symbol, str):
-        return parameters[symbol][0]
+    if isinstance(value, sdk.Parameter):
+        return parameters[value.name][0]
+    if isinstance(value, sdk.ParameterExpression):
+        return value.bind({name: group[0] for name, group in parameters.items()})
     return value
