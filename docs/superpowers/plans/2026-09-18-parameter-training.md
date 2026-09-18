@@ -829,8 +829,19 @@ def _numeric(value: Any) -> float:
 # --- the replay reproduces the circuit it was given ---
 
 
-def test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit() -> None:
-    """The strongest statement available: serialize the rebuild, compare."""
+def test_a_replay_of_a_numeric_circuit_reproduces_its_instructions() -> None:
+    """Scoped to the instructions on purpose.
+
+    The replay reproduces the instruction list and the width; it does not
+    reproduce dtype, shape or metadata, which come from a freshly default
+    constructed ``Circuit``. Measured: a ``complex128`` source gives equal
+    instructions and an unequal envelope. Byte-equality of the whole payload
+    would pass only because this source is default-constructed.
+
+    And it is not the property that matters. A replay built from
+    ``to_dict()`` was byte-for-byte equal on this very circuit and could not
+    execute; the test below is the one that runs it.
+    """
     import flagquantum as fq
 
     source = fq.Circuit(2).h(0).ry(1, theta=0.7).cx(0, 1)
@@ -840,7 +851,7 @@ def test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit() -> No
 
     rebuilt = replay_builder(ir)({})
 
-    assert rebuilt.to_ir().to_dict() == ir.to_dict()
+    assert rebuilt.to_ir().to_dict()["instructions"] == ir.to_dict()["instructions"]
 
 
 def test_a_matrix_gate_survives_the_replay() -> None:
@@ -891,6 +902,106 @@ def test_the_replay_carries_non_parameter_arguments_through_unchanged() -> None:
     symbol = payload[1]["params"]["theta"]
     assert isinstance(symbol, Mapping) and "$tensor" in symbol
     assert _numeric(symbol) == pytest.approx(0.25)
+
+
+def test_a_replayed_circuit_executes_and_agrees_with_its_source() -> None:
+    """The claim byte-equality cannot make: the rebuild runs, and runs the same.
+
+    Measured before this test existed: a replay built from ``to_dict()`` was
+    byte-for-byte equal to its source on this same circuit and failed to
+    execute. Serializing correctly is not the property that matters — producing
+    the same numbers is, and only running it shows that.
+    """
+    import flagquantum as fq
+
+    source = fq.Circuit(2).h(0).ry(1, theta=0.7).cx(0, 1)
+    source.gate("any", [1], matrix=[[1, 0], [0, 1j]])
+    ir = source.to_ir()
+
+    rebuilt = replay_builder(ir)({})
+
+    want = fq.run(source, outputs=[fq.probabilities([0, 1])]).measurements[0].value
+    got = fq.run(rebuilt, outputs=[fq.probabilities([0, 1])]).measurements[0].value
+
+    assert got == pytest.approx(want, abs=1e-9)
+
+
+def test_a_parameter_inside_an_expression_is_substituted() -> None:
+    """A name that appears only inside an expression is still a name to train.
+
+    ``parameter_names`` reports it either way, so the failure is silent until
+    the run: the tool would offer a trainable group it never applies.
+    """
+    import torch
+
+    qir = json.dumps(
+        [
+            {"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "t0"}}},
+            {
+                "name": "rz",
+                "index": [1],
+                "parameters": {
+                    "theta": {"$expression": {"op": "mul", "args": [2.0, {"$parameter": "t1"}]}}
+                },
+            },
+        ]
+    )
+    ir = _ir(qir)
+
+    assert parameter_names(ir) == ("t0", "t1")
+
+    built = replay_builder(ir)({"t0": torch.tensor([0.3]), "t1": torch.tensor([0.4])})
+
+    assert built.is_parameterized() is False, "the rebuild still carries symbols"
+    assert _numeric(
+        built.to_ir().to_dict()["instructions"][1]["params"]["theta"]
+    ) == pytest.approx(0.8)
+
+
+def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
+    """The expression path is optimized, not merely evaluated once.
+
+    A ``ParameterExpression`` resolves through the SDK's own ``bind``, so the
+    question a test has to answer is whether the tensor that comes back is still
+    attached to the graph ``Module`` optimizes. Measuring the gradient against
+    its analytic value answers it: for ``ry(1, t0)`` then ``rz(1, 2*t1)``
+    against ``Y`` on wire 1, ``<Y> = sin(t0) sin(2 t1)``, so ``d/dt1`` is
+    ``2 sin(t0) cos(2 t1)``.
+    """
+    import math
+
+    import flagquantum as fq
+    from flagquantum.algorithms import Hamiltonian, pauli_term
+
+    qir = json.dumps(
+        [
+            {"name": "ry", "index": [1], "parameters": {"theta": {"$parameter": "t0"}}},
+            {
+                "name": "rz",
+                "index": [1],
+                "parameters": {
+                    "theta": {"$expression": {"op": "mul", "args": [2.0, {"$parameter": "t1"}]}}
+                },
+            },
+        ]
+    )
+    ir = _ir(qir)
+    module = fq.Module(
+        replay_builder(ir),
+        parameters={name: 1 for name in parameter_names(ir)},
+        init={"t0": 0.8, "t1": 0.3},
+        hamiltonian=Hamiltonian([pauli_term(1.0, {1: "Y"})]),
+        policy=fq.RuntimePolicy(observable="hamiltonian"),
+    )
+
+    loss = module.execute().require_value().mean()
+    loss.backward()
+
+    groups = module.named_parameter_groups
+    assert float(loss.detach()) == pytest.approx(math.sin(0.8) * math.sin(0.6), abs=1e-6)
+    assert float(groups["t1"].grad) == pytest.approx(
+        2 * math.sin(0.8) * math.cos(0.6), abs=1e-5
+    )
 
 
 # --- the names come from the SDK ---
@@ -989,11 +1100,6 @@ from typing import Any
 from flagquantum_mcp_server._bridge import load_sdk
 from flagquantum_mcp_server.circuits import circuit_from_ir
 
-# The one Python name a parameter value may travel under when it is a symbol
-# rather than a number. Its presence is what makes the argument a tensor.
-PARAMETER_MARKER = "$parameter"
-
-
 def parameter_names(ir: Any) -> tuple[str, ...]:
     """Return the circuit's parameter names, in the SDK's order.
 
@@ -1015,10 +1121,25 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     """Return the callable ``fq.Module`` traces, rebuilding this circuit.
 
     The returned builder takes the parameter mapping ``Module`` hands it — one
-    one-element tensor per name — and returns a live ``Circuit``. Instructions
-    are read from ``ir.to_dict()``, where a ``Parameter`` has become the marker a
-    caller sees over the wire, rather than from the live objects, whose ``params``
-    hold SDK types a JSON tool has no business inspecting.
+    one-element tensor per name — and returns a live ``Circuit``.
+
+    Instructions come from the IR's own ``instructions``, not from
+    ``to_dict()``. The two differ in a way that is easy to miss and was
+    measured: ``to_dict()`` runs every value through the SDK's encoder, turning
+    a parameter into a ``{"$parameter": ...}`` marker, a complex into
+    ``{"$complex": [...]}`` and a matrix's entries the same way. Handing those
+    encodings back to ``Circuit.gate`` builds a circuit that serializes
+    byte-for-byte like the original and cannot execute — ``fq.run`` refuses it
+    with ``planned execution failed`` while the source runs normally. The live
+    objects are ``Parameter``, ``ParameterExpression`` and real matrices, which
+    is what the builder needs and what a JSON tool has no reason to reassemble
+    from markers.
+
+    A channel instruction's ``is_channel`` flag lives in its ``metadata``, and
+    ``Circuit.gate`` takes no metadata, so the replay does not carry it. Measured,
+    a channel circuit fails to execute on this path either way, so no number a
+    caller sees changes — but the replay is not faithful for one and does not
+    claim to be.
 
     Args:
         ir: A validated ``CircuitIR``.
@@ -1026,49 +1147,56 @@ def replay_builder(ir: Any) -> Callable[[Mapping[str, Any]], Any]:
     Returns:
         A callable taking ``{name: tensor}`` and returning a ``Circuit``.
     """
-    instructions = tuple(ir.to_dict()["instructions"])
+    instructions = tuple(ir.instructions)
     n_wires = int(ir.n_wires)
 
     def build(parameters: Mapping[str, Any]) -> Any:
-        circuit = load_sdk().Circuit(n_wires)
+        sdk = load_sdk()
+        circuit = sdk.Circuit(n_wires)
         for instruction in instructions:
             arguments = {
-                str(key): _argument(value, parameters)
-                for key, value in (instruction.get("params") or {}).items()
+                str(key): _argument(value, parameters, sdk)
+                for key, value in instruction.params.items()
             }
             circuit.gate(
-                str(instruction["opcode"]),
-                [int(wire) for wire in instruction["wires"]],
+                str(instruction.name),
+                [int(wire) for wire in instruction.wires],
                 params=arguments or None,
-                matrix=instruction.get("matrix"),
+                matrix=instruction.matrix,
             )
         return circuit
 
     return build
 
 
-def _argument(value: Any, parameters: Mapping[str, Any]) -> Any:
-    """Resolve one serialized gate argument against the parameter mapping.
+def _argument(value: Any, parameters: Mapping[str, Any], sdk: Any) -> Any:
+    """Resolve one live gate argument against the parameter mapping.
 
-    A symbol becomes the tensor ``Module`` supplied for that name. Every other
-    value — a bound number, a ``$tensor``, a ``$complex``, a ``$expression`` —
-    passes through untouched, because the SDK's own decoder built it and this
-    module has no business reinterpreting it.
+    A ``Parameter`` becomes the tensor ``Module`` supplied for that name. A
+    ``ParameterExpression`` — ``2.0 * t0`` — is resolved through the SDK's own
+    public ``bind``, so the arithmetic stays the SDK's rather than being
+    reimplemented here; this module carries no numerical logic and should not
+    acquire any.
 
-    ``[0]`` indexes the one-element group ``Module`` creates per name. A group of
-    any other size would be a name bound to a vector, which this tool never asks
-    for.
+    Every other value is already a number, a complex, or an object the SDK
+    built, and passes through untouched.
+
+    ``[0]`` indexes the one-element group ``Module`` creates per name. A group
+    of any other size would be a name bound to a vector, which this tool never
+    asks for; the construction site is where that shape is asserted.
 
     Args:
-        value: The serialized argument.
+        value: The live argument from an instruction.
         parameters: The mapping ``Module`` handed the builder.
+        sdk: The loaded ``flagquantum`` module, for the two type checks.
 
     Returns:
         The argument to pass to ``Circuit.gate``.
     """
-    symbol = value.get(PARAMETER_MARKER) if isinstance(value, Mapping) else None
-    if isinstance(symbol, str):
-        return parameters[symbol][0]
+    if isinstance(value, sdk.Parameter):
+        return parameters[value.name][0]
+    if isinstance(value, sdk.ParameterExpression):
+        return value.bind({name: group[0] for name, group in parameters.items()})
     return value
 ```
 
@@ -1911,6 +2039,9 @@ def train_parameters(
 
     sdk = load_sdk()
     torch = load_torch()
+    # One element per name, and the replay's `parameters[name][0]` depends on
+    # it: a group of any other size would be a name bound to a vector, and a
+    # zero-element group raises IndexError inside the builder rather than here.
     module = sdk.Module(
         replay_builder(ir),
         parameters={name: 1 for name in names},
