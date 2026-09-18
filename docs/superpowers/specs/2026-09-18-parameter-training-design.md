@@ -39,13 +39,24 @@ not read off a docstring.
 
 **A serialized circuit can drive `Module` and `train`.** They want a Python
 callable, not JSON, which looked like a dead end. Replaying the IR into a
-closure works, and the replay is faithful: rebuilding a circuit from the
-instructions in its own IR through
-`Circuit.gate(name, wires, params=..., matrix=...)` reproduces that payload byte
-for byte, matrix gates included. A parameterized circuit replayed with tensors
-serializes those tensors as `$tensor` rather than as the `$parameter` symbol it
-came from, which is the difference between a symbol and a value rather than a
-difference in the circuit.
+closure works: rebuilding a circuit from the instructions in its own IR through
+`Circuit.gate(name, wires, params=..., matrix=...)` reproduces **its instruction
+list** byte for byte, matrix gates included.
+
+**Its instruction list, not its whole envelope**, and the difference matters
+because the wider claim is the one that sounds better. The replay reproduces the
+instructions and the width; every other envelope field — `dtype`, `shape`,
+`metadata` — comes from a freshly default-constructed `Circuit`. A
+`dtype="complex128"` source is equal in instructions and unequal in everything
+else, so "the replay rebuilds the payload byte for byte" is **false in general
+and true only of a source that was itself default-constructed**. An earlier
+version of this design stated the wider claim, and it passed the test written
+against it for exactly that reason.
+
+A parameterized circuit replayed with tensors serializes those tensors as
+`$tensor` rather than as the `$parameter` symbol it came from, which is the
+difference between a symbol and a value rather than a difference in the
+circuit.
 
 `Circuit.gate` is the single primitive — built-in gates, arbitrary matrices and
 channels all go through it, so the replay layer is a loop and not a gate table.
