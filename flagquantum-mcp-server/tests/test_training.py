@@ -110,8 +110,9 @@ def test_a_replayed_circuit_executes_and_agrees_with_its_source() -> None:
 def test_a_parameter_inside_an_expression_is_substituted() -> None:
     """A name that appears only inside an expression is still a name to train.
 
-    ``parameter_names`` reports it either way, so the failure is silent until
-    the run: the tool would offer a trainable group it never applies.
+    ``parameter_names`` reports it either way, so a caller cannot tell from the
+    parameter list whether the substitution happened; only running the circuit
+    shows it.
     """
     import torch
 
@@ -148,9 +149,14 @@ def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
     ``rz(1, 2*t1)`` against ``Y`` on wire 1, ``<Y> = sin(t0) sin(2 t1)``, so
     ``d/dt1`` is ``2 sin(t0) cos(2 t1)``.
 
-    Without this, binding floats instead of tensors would leave every other
-    test green while a parameter inside an expression silently stopped
-    training — the failure this tool exists to prevent.
+    Eager binding does not reach the comparison: converting the traced tensor to
+    a Python float makes ``make_fx`` refuse the builder at trace time ("Module
+    builder compilation requires static circuit topology"), so that variant fails
+    loudly rather than training nothing quietly. What the gradient assertion is
+    for is the variant that does trace — a binding that detaches the group from
+    the graph, which produces these same numbers with no gradient for the name
+    inside the expression. This is the only test whose builder sees an
+    expression, so it is the only one that can see either.
     """
     import math
 
