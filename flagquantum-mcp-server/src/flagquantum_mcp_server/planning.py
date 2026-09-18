@@ -295,12 +295,18 @@ def _weighted_term(term: Any, position: int, *, n_wires: int) -> tuple[str, floa
             "observable, so it cannot be evaluated."
         )
     if not is_finite_number(coefficient):
+        # Two ways to fail this, and the message must not name the wrong one:
+        # a float('nan') or float('inf') is a perfectly ordinary float that is
+        # not finite, and an int past float range raises OverflowError inside
+        # math.isfinite. Measured, both reached the conversion below before this
+        # guard; the first arrived as nan and the second as an internal error.
         raise ToolInputError(
-            f"{where} has a coefficient that is {coefficient!r}, which is too "
-            "large to be a float, so it is not a finite real number either. "
-            "Without this refusal the conversion below raises OverflowError, and "
-            "the caller gets an internal error instead of a message naming the "
-            "term."
+            f"{where} has a coefficient that is {coefficient!r}, which is not a "
+            "finite real number. A nan or an infinity is not a usable weight, "
+            "and a value too large for a float cannot be converted to one "
+            "either — without this refusal the conversion below raises "
+            "OverflowError and the caller gets an internal error instead of a "
+            "message naming the term."
         )
     _check_pauli_string(pauli, n_wires=n_wires, where=where)
     return pauli.upper(), float(coefficient)

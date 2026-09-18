@@ -466,8 +466,8 @@ ansatz measured here — 71 instructions — is predicted at 119 s per step and 
 none. That is a statement about the circuit, not the width: one gate at 24 wires
 is still under the budget, and the budget refuses by prediction rather than by
 width, so a *narrow* circuit with many layers is bounded for the same reason — a
-2500-instruction four-wire circuit is predicted at 0.25 s per step, which the
-default budget admits 238 steps at a time where a one-gate circuit at that width
+2500-instruction four-wire circuit is predicted at 0.5 s per step, which the
+default budget admits 119 steps at a time where a one-gate circuit at that width
 gets three thousand.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run

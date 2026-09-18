@@ -340,8 +340,10 @@ def test_the_prediction_over_predicts_every_point_it_was_calibrated_from() -> No
     lesson one axis over: every one of the first sixteen is either small-width
     with few instructions (where the floor governs) or large-width (where the
     state or gate term governs), and **none is small-width with many
-    instructions**. The three-term model predicted its 0.02 s floor at all five
-    of the new points; the truth runs to 0.223 s per step at two wires with 4000
+    instructions**. The three-term model predicted its 0.02 s floor at three of
+    the five new points — the two 8-wire rows it got to 0.0640 and 0.1024, which
+    is why the design's new table calls those two "over by 3.6x" rather than
+    floored; the truth runs to 0.223 s per step at two wires with 4000
     instructions, and the budget admitted 2975 steps of that — 664 s of work
     against a 60 s budget. Each new row was measured in the same way as the
     rest, and each was checked not to be a floor row: what it pins is the

@@ -360,8 +360,11 @@ def predict_seconds(ir: Any, steps: int) -> float:
     The dispatch term governs over roughly two to eleven wires: above that the
     gate term is larger, so this cannot turn an under-prediction into an
     over-refusal at the width of any point the other sixteen rows cover. Those
-    sixteen predictions are unchanged by it, which the test asserts directly
-    rather than leaving to arithmetic.
+    sixteen predictions are unchanged by it — recomputed, not argued: the term
+    is smaller than the winning term at every one, so none of them moves. No
+    test asserts that directly; the calibration loop only asserts the model is
+    an upper bound, so a later change to DISPATCH_COST could move them without a
+    red. The value pin in test_api_contract.py is what would fail.
 
     A single coefficient cannot follow the true curve either, which falls from
     1.0e-5 per instruction-state at four qubits to 2.1e-8 at twenty and rises

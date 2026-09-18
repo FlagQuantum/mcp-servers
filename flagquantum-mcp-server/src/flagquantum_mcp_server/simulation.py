@@ -9,9 +9,12 @@ than summarising them, so a caller can see which path produced a number instead
 of being told one was taken.
 
 The SDK's own claim fields travel with the result too. A local run comes back
-with ``accuracy.metric == "not_measured"`` and ``release_gate_allowed: False``:
-the SDK does not present a simulation as evidence about hardware, and neither
-does this server.
+with ``accuracy.metric == "not_measured"``: the SDK does not present a
+simulation as evidence about hardware, and neither does this server. That is the
+field this result actually carries — measured, it is ``{status, outputs,
+execution}``, and there is no ``release_gate_allowed`` on it.
+``release_gate_allowed`` belongs to ``plan_execution_tool``'s summary, which is
+where a caller should look for it.
 
 Four things are refused rather than reinterpreted, and they are the reason this
 module is more than a call to ``fq.run``:
