@@ -2224,7 +2224,11 @@ from flagquantum_mcp_server.circuits import (
     circuit_from_ir,
     resolve_ir,
 )
-from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
+from flagquantum_mcp_server.errors import (
+    ToolInputError,
+    ToolLimitError,
+    UnsupportedFormatError,
+)
 from flagquantum_mcp_server.planning import validate_pauli_terms
 from flagquantum_mcp_server.preconditions import (
     SDK_FAILURE_BASES,
@@ -2890,6 +2894,8 @@ def _objective(hamiltonian: Any, *, n_wires: int) -> Any:
     """
     try:
         return hamiltonian_from_terms(hamiltonian, n_wires=n_wires)
+    except UnsupportedFormatError as exc:
+        raise UnsupportedFormatError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolLimitError as exc:
         raise ToolLimitError(_in_this_tools_vocabulary(str(exc))) from exc
     except ToolInputError as exc:
@@ -2905,26 +2911,27 @@ def _in_this_tools_vocabulary(message: str) -> str:
     ``hamiltonian`` and an objective, so every one of those nouns names something
     they never typed. The refusals themselves are unchanged; only the nouns move.
 
-    **Four shapes, not one, and that was not obvious.** The first version of this
-    replaced ``'terms'`` alone — the quoted field name. Every *term-level*
-    message says ``terms[0]`` unquoted, and those are the majority, because a
-    malformed term is the common case. Measured: the field-level pair were
-    renamed and all six term-level refusals still said ``terms``.
+    **Every message this reaches was measured.** The validator raises eight
+    malformed-input refusals plus the bound's; they open with ``'terms' is ...``
+    (twice), ``terms[0] ...`` (five times), ``An expectation needs ...`` and
+    ``This expectation carries ...``. The four edits below cover all four
+    openings, and a test asserts the property over all eight shapes rather than
+    trusting the list.
 
-    **Every message this reaches was measured, not guessed.** The validator
-    raises eight malformed-input refusals plus the bound's; they open with
-    ``'terms' is ...`` (twice), ``terms[0] ...`` (five times), ``An expectation
-    needs ...`` and ``This expectation carries ...``. The four replaces below
-    cover all four openings, and a test asserts the property over all eight
-    shapes rather than trusting the list.
+    **The field name is anchored to the start of the message, and that is not
+    cosmetic.** The validator quotes its own field name — ``'terms' is NoneType``
+    — and it also quotes the caller's offending value back at them: ``has a
+    coefficient that is a string ('terms')``. A caller who passes the literal
+    string ``terms`` produces a message containing *both*, and an unanchored
+    replace cannot tell them apart. Measured, the unanchored version answered
+    ``('hamiltonian')`` — the caller's own value rewritten, in the message whose
+    entire job is to tell them what was wrong with it. Anchoring removes that
+    case. A literal containing ``terms[`` is still echoed renamed; that residual
+    is pinned by a test rather than left to be discovered.
 
-    **The two phrases are named, not replaced wholesale.** A blanket
+    The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
-    ``expectation`` *output*, which is the one place the word is correct. This
-    function only ever runs on the training path, so that cannot happen today —
-    but a phrase list that says what it covers is auditable and a blanket replace
-    is not. If the validator gains a fifth shape, add it here; the property test
-    below is what will notice.
+    ``expectation`` *output*, which is the one place the word is correct.
 
     Args:
         message: A refusal's text, from the shared validator.
@@ -2932,11 +2939,13 @@ def _in_this_tools_vocabulary(message: str) -> str:
     Returns:
         The same refusal, in this tool's nouns.
     """
+    if message.startswith("'terms'"):
+        message = "'hamiltonian'" + message[len("'terms'") :]
     return (
-        message.replace("'terms'", "'hamiltonian'")
-        .replace("terms[", "hamiltonian[")
+        message.replace("terms[", "hamiltonian[")
         .replace("An expectation needs", "An objective needs")
         .replace("This expectation carries", "This objective carries")
+    )
     )
 ```
 
@@ -2994,6 +3003,47 @@ def test_no_refusal_from_this_tool_says_a_noun_the_caller_did_not_write() -> Non
         assert "expectation" not in message, (objective, message)
 
 
+def test_an_unsupported_key_still_reports_as_a_format_problem() -> None:
+    """The same collapse that hit the bound hits this code, and nothing noticed.
+
+    ``UnsupportedFormatError`` subclasses ``ToolInputError``, so a bare
+    ``except ToolInputError`` catches it and re-raises the base class. Measured
+    before the fix: an unknown key in a term came back as ``INVALID_INPUT``
+    where the validator had raised ``UNSUPPORTED_FORMAT``. The property test
+    above passes either way, because it asserts prose — which is exactly why
+    this test asserts the code.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(UnsupportedFormatError) as caught:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": 1.0, "extra": 1}], "qir", steps=1)
+
+    assert caught.value.code == "UNSUPPORTED_FORMAT"
+
+
+def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
+    """The rename touches the validator's nouns, never the caller's value.
+
+    A refusal quotes the offending value back: ``has a coefficient that is a
+    string ('terms')``. Renaming the field name ``terms`` therefore has a message
+    in which the SDK's word and a caller's literal are the same six characters,
+    and an unanchored replace answers ``('hamiltonian')`` — the caller's own
+    value rewritten, in the message whose job is to explain it. Measured.
+
+    A literal containing ``terms[`` is still echoed renamed; that is the residual
+    this test records rather than claims away.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": "terms"}], "qir", steps=1)
+
+    message = str(caught.value)
+    assert "('terms')" in message, message
+    assert "('hamiltonian')" not in message, message
+    assert "hamiltonian[0]" in message, message
+
+
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3029,8 +3079,8 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds ten tests; read the count off the output and
-check the def count rose by ten. (Three of the refusals it would otherwise add
+Expected: PASS. This step adds twelve tests; read the count off the output and
+check the def count rose by twelve. (Three of the refusals it would otherwise add
 are already in the file, shipped with Task 7 — see the note at the top of this
 task. One of the ten is parametrized, so the collected count rises by more than
 the def count; that is what Step 3 of Task 7 saw too.)
