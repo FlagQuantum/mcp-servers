@@ -908,3 +908,28 @@ def test_a_caller_s_literal_is_echoed_back_unchanged() -> None:
     assert "('terms')" in message, message
     assert "('hamiltonian')" not in message, message
     assert "hamiltonian[0]" in message, message
+
+
+def test_a_literal_containing_the_bracket_form_is_the_recorded_residual() -> None:
+    """The one input the rename still gets wrong, written down as a test.
+
+    ``terms[`` is anchored to nothing: it is the SDK's noun inside
+    ``terms[0] has no 'pauli' string``, and it appears mid-message, so there is
+    no position to anchor it to. A caller whose own value is the literal string
+    ``terms[`` therefore has it echoed back as ``hamiltonian[`` — the same defect
+    the anchor fixed for the other shape, one step further out.
+
+    This asserts the defective behaviour on purpose. It is here so the residual
+    is a fact in the suite rather than a sentence in a docstring, and so that
+    anyone who fixes it gets a red test telling them what changed. Measured
+    wording; if the rename is ever rebuilt to take the noun as a parameter
+    instead of substituting text, this test is what should be deleted.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, [{"pauli": "terms[", "coefficient": 1.0}], "qir", steps=1)
+
+    message = str(caught.value)
+    assert "'hamiltonian['" in message, message
+    assert "terms[0]" not in message, message
