@@ -3587,17 +3587,39 @@ same-named 0.2.0 wheel from an earlier rehearsal while Task 9 was in flight.
 Assert on the contents instead of the name:
 
 ```bash
-"$WHEELCHECK/bin/python" -c "
-import sys, zipfile
-wheel = sys.argv[1]
-src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
-assert 'train_parameters_tool' in src, f'{wheel} is stale: it predates this change'
-print('wheel is fresh')
+python3 -c "
+import pathlib, sys, zipfile
+
+wheel, source = pathlib.Path(sys.argv[1]), pathlib.Path("src/flagquantum_mcp_server")
+assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
+stale, absent, packaged = [], [], 0
+with zipfile.ZipFile(wheel) as z:
+    names = set(z.namelist())
+    for f in sorted(source.rglob("*.py")):
+        rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
+        if rel not in names:
+            absent.append(rel)
+        elif z.read(rel) != f.read_bytes():
+            stale.append(rel)
+        else:
+            packaged += 1
+assert packaged, f"no modules compared: {source} holds no .py files"
+assert not absent, f"{wheel} is missing {absent}"
+assert not stale, f"{wheel} was not built from this tree: {stale}"
+print(f"wheel matches the source tree ({packaged} modules)")
 " dist/*.whl
 ```
 
-An `assert` on the built artifact, not on the source tree you already ran the
-suite against — the point of the rehearsal is that the *packaged* thing works.
+**Compare the packaged modules to the source, not to a phrase.** An earlier draft
+of this step asserted that the wheel contained the string
+`train_parameters_tool` — a marker tied to *that* task's change, which passes on
+a wheel built before the *next* one. Measured, and it happened here: `dist/` held
+a wheel from the previous task whose `server.py` was one commit behind, and the
+phrase assertion was green on it. Byte-equality against the source tree cannot
+go stale that way, because it names no feature — it asks only whether the wheel
+came from this tree, which is exactly what the rehearsal needs to know. Measured
+on this machine, it flags the stale wheel as `['flagquantum_mcp_server/server.py']`
+and passes once the wheel is rebuilt.
 
 - [ ] **Step 9: Commit**
 
@@ -3622,7 +3644,12 @@ Two jobs that are cheap together and expensive apart: a tier-3 dependency nothin
 - Modify: `AGENTS.md`
 
 **Interfaces:**
-- Consumes: the tier-3 names `flagquantum.algorithms.Hamiltonian`, `flagquantum.algorithms.pauli_term` and `flagquantum.RuntimePolicy`.
+- Consumes: the tier-3 names `flagquantum.algorithms.Hamiltonian` and
+  `flagquantum.algorithms.pauli_term`, and the tier-1 name
+  `flagquantum.RuntimePolicy` — which is in the frozen snapshot, unlike those
+  two. **Measured:** `sorted(flagquantum.__all__)` is 31 names and equals the
+  snapshot in `docs/public_api_v1.json` exactly; `RuntimePolicy` is in it,
+  `Hamiltonian` and `pauli_term` are not.
 - Produces: no runtime names.
 
 - [ ] **Step 1: Write the failing contract test**
@@ -3758,11 +3785,23 @@ Fourth, two table rows. In the limits table:
 | `FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` | 60 | Predicted cost of one training call |
 ```
 
-And in the tier table's third row, extending the existing list:
+And in the tier table, **two rows** — not one. The objective's names are not all
+in the same tier, and an earlier draft of this step put `RuntimePolicy` in the
+third row:
 
 ```markdown
-| 3. Public but not frozen | …, `flagquantum.algorithms.{Hamiltonian, pauli_term}`, `flagquantum.RuntimePolicy` | train_parameters |
+| 1. Frozen snapshot | …, `Parameter`, `RuntimePolicy`, … | … |
 ```
+```markdown
+| 3. Public but not frozen | …, `flagquantum.algorithms.{Hamiltonian, pauli_term}` | …, train_parameters |
+```
+
+`RuntimePolicy` goes in the **first** row. It is in `stable_exports` — measured
+above — so listing it as not-frozen is the false claim, and it is the one a
+reader would act on, because the row is what tells them which promise the SDK
+has made. It still needs its own pin, and the paragraph below the table should
+say why: the snapshot fixes the *name*, and what decides whether the Hamiltonian
+reaches the run is `RuntimePolicy().observable`, whose default is `"z"`.
 
 - [ ] **Step 4: Publish the one fact the training tool hides under `Returns:`**
 
@@ -3854,10 +3893,25 @@ WHEELCHECK="$(mktemp -d)"
 python3 -m venv "$WHEELCHECK"
 "$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python3 -c "
-import sys, zipfile
-wheel = sys.argv[1]
-src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
-assert 'train_parameters_tool' in src, f'{wheel} predates this change'
+import pathlib, sys, zipfile
+
+wheel, source = pathlib.Path(sys.argv[1]), pathlib.Path("src/flagquantum_mcp_server")
+assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
+stale, absent, packaged = [], [], 0
+with zipfile.ZipFile(wheel) as z:
+    names = set(z.namelist())
+    for f in sorted(source.rglob("*.py")):
+        rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
+        if rel not in names:
+            absent.append(rel)
+        elif z.read(rel) != f.read_bytes():
+            stale.append(rel)
+        else:
+            packaged += 1
+assert packaged, f"no modules compared: {source} holds no .py files"
+assert not absent, f"{wheel} is missing {absent}"
+assert not stale, f"{wheel} was not built from this tree: {stale}"
+print(f"wheel matches the source tree ({packaged} modules)")
 " dist/*.whl
 "$WHEELCHECK/bin/python" -m pip install dist/*.whl
 "$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
@@ -3866,7 +3920,18 @@ assert 'train_parameters_tool' in src, f'{wheel} predates this change'
 The version is static, so the wheel's *name* cannot tell you whether the build
 ran: a stale `flagquantum_mcp_server-0.2.0-py3-none-any.whl` and a fresh one are
 the same file path, and a build that failed leaves the rehearsal green against
-the previous run's code. Assert on the packaged `server.py` instead.
+the previous run's code. **Compare the packaged modules to the source tree
+instead of asserting on a feature name.** A phrase tied to one change passes on a
+wheel built before the next one — measured, `dist/` held a wheel one commit
+behind and the phrase assertion was green on it. Byte-equality names no feature
+and cannot go stale that way.
+
+**The check refuses to pass vacuously.** Run from anywhere but
+`flagquantum-mcp-server/`, `source.rglob` finds nothing, every comparison is
+skipped, and "0 modules compared" reads as success — measured, exactly that
+happened while this step was being written. So it asserts the directory exists
+and that at least one module was compared, before it asserts anything about the
+wheel.
 
 - [ ] **Step 6: Check the documented commands still all resolve**
 
@@ -3889,10 +3954,20 @@ Expected: all pass.
 
 ```bash
 git add flagquantum-mcp-server/tests/test_api_contract.py \
+        flagquantum-mcp-server/tests/test_server_contract.py \
+        flagquantum-mcp-server/tests/test_documented_commands.py \
+        flagquantum-mcp-server/src/flagquantum_mcp_server/server.py \
         flagquantum-mcp-server/README.md \
         AGENTS.md
 git commit -m "docs: pin the training dependencies and describe the tool"
 ```
+
+**Six files, and an earlier draft of this step listed three.** Steps 3–5 edit
+`README.md`, `AGENTS.md`, `server.py` and `test_server_contract.py`, and Step 5's
+wheel block forced a parser correction in `test_documented_commands.py` — none of
+which was on the original list, so committing it verbatim would have left the
+task's central change unstaged. When a step's file list and its `git add` list are
+written at different times, the second is the one that goes stale silently.
 
 Do **not** bump the version and do not release. AGENTS.md rule 8: accumulate on `main` and release when someone outside the repository would benefit — that decision is separate and needs explicit authorization.
 

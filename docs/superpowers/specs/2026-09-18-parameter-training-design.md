@@ -393,15 +393,31 @@ class:
 - is **not** named in any capability's `public_apis`;
 - is **not** reachable as `flagquantum.Hamiltonian`.
 
-`RuntimePolicy` is reachable as `flagquantum.RuntimePolicy` but is likewise not
-in `stable_exports` and not named in any capability's `public_apis`. Without it
-the Hamiltonian is ignored, so it is not optional.
+`RuntimePolicy` is reachable as `flagquantum.RuntimePolicy` and **is** in
+`stable_exports`. Without it the Hamiltonian is ignored, so it is not optional.
 
-Both are tier 3: public, not frozen. AGENTS.md rule 3 admits tier 3 when there
-is a reason and the names are pinned by a test, which is the situation here —
-there is no other way to express the objective, and no other way to make the SDK
-read it. The names go into the tier-3 table in `tests/test_api_contract.py` in
-the same change.
+The two are therefore in **different tiers**, and an earlier draft of this
+document had them both in tier 3. Measured against the installed SDK:
+`sorted(flagquantum.__all__)` is 31 names and equals the snapshot in
+`docs/public_api_v1.json` exactly, `RuntimePolicy` is one of them, and
+`Hamiltonian` and `pauli_term` are neither. So:
+
+- `Hamiltonian` and `pauli_term` are **tier 3**: public, not frozen. AGENTS.md
+  rule 3 admits tier 3 when there is a reason and the names are pinned by a
+  test, which is the situation here — there is no other way to express the
+  objective. They go into the tier-3 table in `tests/test_api_contract.py`.
+- `RuntimePolicy` is **tier 1**, and the snapshot fixes only its name. That is
+  not enough here: whether the Hamiltonian reaches the run is decided by
+  `RuntimePolicy().observable`, whose default is `"z"`, so a rename of *that*
+  attribute would leave the tool training against ⟨Z₀⟩ while reporting success,
+  with no other test noticing. It therefore gets a bespoke pin — the default and
+  the `"hamiltonian"` value — in the same file, rather than a `hasattr` in the
+  tier-1 tuple.
+
+The correction is worth keeping in the document rather than quietly applied: the
+tier is a fact about the SDK, and both this document and the plan asserted the
+wrong one from the same unread assumption — that a name reached only through a
+helper must be unfrozen. Reachability and frozenness are different questions.
 
 `torch` is reached through the SDK rather than imported directly — the server
 declares two dependencies and `torch` is not one of them — even though
