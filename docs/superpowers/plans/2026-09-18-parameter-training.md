@@ -2911,6 +2911,13 @@ def _in_this_tools_vocabulary(message: str) -> str:
     malformed term is the common case. Measured: the field-level pair were
     renamed and all six term-level refusals still said ``terms``.
 
+    **Every message this reaches was measured, not guessed.** The validator
+    raises eight malformed-input refusals plus the bound's; they open with
+    ``'terms' is ...`` (twice), ``terms[0] ...`` (five times), ``An expectation
+    needs ...`` and ``This expectation carries ...``. The four replaces below
+    cover all four openings, and a test asserts the property over all eight
+    shapes rather than trusting the list.
+
     **The two phrases are named, not replaced wholesale.** A blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
     ``expectation`` *output*, which is the one place the word is correct. This
@@ -3007,7 +3014,14 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
         train_parameters(ANGLED, [{"pauli": "Z", "coefficient": 1.0}] * 5, "qir", steps=1)
 
     assert caught.value.code == "LIMIT_EXCEEDED"
-    assert "hamiltonian" in str(caught.value)
+    # Not `"hamiltonian" in ...`: the bound's own message says "This expectation
+    # carries 5 terms", and the rename turns that phrase into "This objective
+    # carries" — it names no field at all, so the word never appears. Asserting
+    # for it here is a test that cannot pass, which is how this was found.
+    # These two lines pin the fourth rename shape instead, which is worth more:
+    # the phrase is the only one that reaches the bound's message.
+    assert "expectation" not in str(caught.value)
+    assert "objective" in str(caught.value)
 ```
 
 `ToolLimitError` is already in this file's error import, from Task 7.
@@ -3029,6 +3043,7 @@ Each refusal is a guard clause. The mutation is to delete it and watch exactly o
 cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 import ast, pathlib, shutil, subprocess
+from pathlib import Path
 
 path = Path("src/flagquantum_mcp_server/training.py")
 original = path.read_text()
