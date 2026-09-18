@@ -42,6 +42,7 @@ input, so a prediction decides before any work starts. See ``predict_seconds``.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -371,6 +372,7 @@ def _check_learning_rate(learning_rate: Any) -> None:
     if (
         isinstance(learning_rate, bool)
         or not isinstance(learning_rate, (int, float))
+        or not math.isfinite(learning_rate)
         or learning_rate <= 0
     ):
         raise ToolInputError(
@@ -472,9 +474,13 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
     resolved: dict[str, float] = {}
     for name in names:
         value = values[name]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
             raise ToolInputError(
-                f"values[{name!r}] is {value!r}; every starting value must be a real number."
+                f"values[{name!r}] is {value!r}; every starting value must be a finite real number."
             )
         resolved[name] = float(value)
     return resolved

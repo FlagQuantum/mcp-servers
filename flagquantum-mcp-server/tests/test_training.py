@@ -655,7 +655,9 @@ def test_a_run_past_the_budget_is_refused_before_any_work_starts(
 
     assert time.perf_counter() - started < 1.0, "the refusal did no work"
     message = str(caught.value)
-    assert "16" in message
+    # "16-qubit", not "16": the predicted seconds and the instruction count are
+    # both in this message, and either could contain "16" by coincidence.
+    assert "16-qubit" in message
     assert "5000" in message
     assert "FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS" in message
 
@@ -666,3 +668,38 @@ def test_a_run_inside_the_budget_is_not_refused(monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setenv("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", "1")
 
     assert train_parameters(ANGLED, TFIM2, "qir", steps=1)["status"] == "success"
+
+
+# --- the refusals that matter ---
+#
+# These two are Task 8's tests, delivered early by this round's fix so that each
+# of the two `math.isfinite` guards in `training.py` has a test that can red on
+# its own. Task 8's step-1 block lists both verbatim; when that task runs it must
+# not append a second copy of either — two `def` of one name in a module shadow,
+# the later wins, and pytest would then collect only one of them.
+
+
+def test_a_non_finite_starting_value_is_refused() -> None:
+    """NaN reaches the optimizer and comes back as a successful run of NaN.
+
+    Measured: without this refusal, ``values={"t0": nan}`` returns
+    ``status: "success"`` with every loss and every returned parameter NaN.
+    ``json.loads`` accepts the ``NaN`` and ``Infinity`` tokens, so a payload
+    carrying one is not rejected before it gets here.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": float("nan"), "t1": 0.1})
+
+    assert "t0" in str(caught.value)
+
+
+@pytest.mark.parametrize("rate", [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf")])
+def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", learning_rate=rate)
+
+    assert "learning_rate" in str(caught.value)
