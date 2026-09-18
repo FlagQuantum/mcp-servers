@@ -139,8 +139,13 @@ def predict_seconds(ir: Any, steps: int) -> float:
     A single coefficient cannot follow the true curve, which falls from 1.0e-5
     per instruction-state at four qubits to 2.1e-8 at twenty and rises again to
     5.7e-8 at twenty-four as the state stops fitting where it used to. The
-    coefficient clears the highest point rather than the average one, which
-    makes this 3-5x pessimistic through the middle.
+    coefficient clears the highest point rather than the average one.
+
+    Where that leaves the margin, over every width it was calibrated at: 11x at
+    four qubits and 4.9x at eight, where the floor is doing all the work; 2.0x
+    at thirteen through 4.8x at twenty; 1.7x at twenty-four, the thinnest and
+    the one that matters least, since a single step there is 68 s and the budget
+    refuses every run above two steps anyway.
 
     Args:
         ir: A validated ``CircuitIR``.
