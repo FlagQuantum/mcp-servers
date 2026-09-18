@@ -14,11 +14,17 @@
 
 - **Which directory a command runs in.** Every task assumes the shell starts
   each command in the **repository root**. `git add flagquantum-mcp-server/...`
-  and `git checkout flagquantum-mcp-server/...` are written for that directory.
-  The mutation and verification blocks below open with
-  `cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"` rather than
-  `cd flagquantum-mcp-server`, so they work from either; use those forms, and
-  never leave a mutation applied because a restore path did not resolve.
+  is written for that directory. The mutation and verification blocks below open
+  with `cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"` rather
+  than `cd flagquantum-mcp-server`, so they work from either.
+- **Mutations are reverted by moving a sidecar back, never by `git checkout`.**
+  Each mutation script writes `Path(str(p) + ".mutbak").write_text(before)`
+  before it breaks anything, and the restore is
+  `mv <file>.mutbak <file>`. `git checkout <path>` reverts the file to HEAD —
+  and every mutation step runs *before* its task's commit, so a checkout would
+  discard the task's own work along with the mutation, leaving a tree that is
+  neither mutated nor implemented. If you see a `.mutbak` file still on disk at
+  the end of a task, the restore did not run.
 - Dependency range is `flagquantum>=0.2,<0.3` and `fastmcp>=3.2.0,<4`. Do not add a third declared dependency; `torch` is reached through the SDK.
 - No network egress, no credentials, no hardware. Every tool runs locally and deterministically.
 - Tools never raise across the MCP boundary; a failure returns `{"status": "error", "error": {"code": ..., "message": ...}}`.
@@ -258,6 +264,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/planning.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "    _check_pauli_string(pauli, n_wires=n_wires, where=where)\n"
     "    return pauli.upper(), float(coefficient)",
@@ -272,7 +279,7 @@ PY
 Expected: FAIL — `test_an_all_identity_term_is_refused_by_its_position` reports that no error was raised, or a length test does. Then restore:
 
 ```bash
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/planning.py.mutbak src/flagquantum_mcp_server/planning.py
 ```
 
 If the suite passes with the validation removed, the extraction is decorative and the terms are being checked somewhere else — find out where before continuing.
@@ -544,6 +551,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/preconditions.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "    if not observables:\n        return\n",
     "    if not observables:\n        return\n    return\n",
@@ -552,7 +560,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_simulation.py -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/preconditions.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/preconditions.py.mutbak src/flagquantum_mcp_server/preconditions.py
 ```
 
 Expected: FAIL on the observable-refusal test before the restore. If it passes, `simulation.py` is still refusing on its own and the move is incomplete.
@@ -711,6 +719,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/limits.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     'return _positive_int("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", DEFAULT_MAX_TRAIN_SECONDS)',
     'return int(os.environ.get("FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS", DEFAULT_MAX_TRAIN_SECONDS))',
@@ -719,7 +728,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_budget -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/limits.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/limits.py.mutbak src/flagquantum_mcp_server/limits.py
 ```
 
 Expected: FAIL on the malformed-value test. A bound that reads `"0"` as zero would refuse every call for a deployment that meant "unlimited", which is the failure the fallback exists to prevent.
@@ -1060,6 +1069,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "                params=arguments or None,\n                matrix=instruction.get(\"matrix\"),\n",
     "                params=arguments or None,\n",
@@ -1068,7 +1078,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit` and `test_a_matrix_gate_survives_the_replay`.
@@ -1079,6 +1089,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "        return parameters[symbol][0]",
     "        return next(iter(parameters.values()))[0]",
@@ -1087,7 +1098,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_the_replay_binds_each_symbol_by_name_not_by_position`. That test uses two parameters and binds them in reverse order precisely so that a positional replay cannot pass.
@@ -1293,12 +1304,13 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace("STEP_COST_COEFFICIENT = 1e-7", "STEP_COST_COEFFICIENT = 1e-9")
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL, naming the width whose prediction fell below its measurement. Then confirm the floor is load-bearing the same way:
@@ -1309,12 +1321,13 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace("MIN_STEP_SECONDS = 0.02", "MIN_STEP_SECONDS = 0.0001")
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL at 4 and 8 qubits.
@@ -1524,6 +1537,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     '{wire: letter for wire, letter in enumerate(pauli) if letter != "I"}',
     "{wire: letter for wire, letter in enumerate(pauli)}",
@@ -1536,7 +1550,7 @@ from flagquantum_mcp_server.training import hamiltonian_from_terms
 term = hamiltonian_from_terms([{'pauli': 'IX'}], n_wires=2).terms[0]
 print('ops after the SDK normalized it:', term.ops)
 "
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 `_normalize_pauli` in the SDK filters identities out of its `ops` tuple, so the
@@ -1559,6 +1573,47 @@ If either assertion fails, add it to the test module as
 `test_a_pauli_letter_lands_on_the_wire_its_position_names` before continuing —
 a mismatch here would train a different Hamiltonian than the caller wrote, with
 every energy plausible.
+
+Then the mutation that matters most in this task. On this path
+`hamiltonian_from_terms` calls `validate_pauli_terms` and builds through
+`algorithms.pauli_term`; `planning._pauli_observable` is **not** involved. So
+`_check_pauli_string` is the only thing standing between the caller and a term
+the SDK will quietly accept. Break it and see what that buys:
+
+```bash
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
+python3 - <<'PY'
+from pathlib import Path
+p = Path("src/flagquantum_mcp_server/planning.py")
+before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
+after = before.replace(
+    "    _check_pauli_string(pauli, n_wires=n_wires, where=where)\n"
+    "    return pauli.upper(), float(coefficient)",
+    "    return pauli.upper(), float(coefficient)",
+)
+assert after != before, "mutation did not apply"
+p.write_text(after)
+PY
+../.venv/bin/pytest tests/test_training.py -k "refuses_the_expectation_builder" -q
+python3 -c "
+from flagquantum_mcp_server.training import hamiltonian_from_terms
+H = hamiltonian_from_terms([{'pauli': 'ZZ', 'coefficient': -1.0}, {'pauli': 'II', 'coefficient': 99.0}], n_wires=2)
+print('objective built with an all-identity term:', H)
+print('its ops:', [t.ops for t in H.terms])
+"
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/planning.py.mutbak src/flagquantum_mcp_server/planning.py
+```
+
+Expected, and measured before this plan was written: the pytest run FAILS on
+`test_a_term_that_the_expectation_builder_refuses_is_refused_here_too`, and the
+second command **succeeds**, building a `HamiltonianTerm` whose `ops` is `()`.
+The SDK does not refuse an all-identity term — it accepts it and contributes
+`coefficient × ⟨I⟩` to every energy. So without this check the training tool
+would minimize a Hamiltonian with a constant the caller never wrote, converge
+cleanly, and report the result as an energy. That is the same shape of failure
+as the `RuntimePolicy` trap this design was rewritten around, which is why the
+refusal is pinned by a test rather than left to the SDK.
 
 - [ ] **Step 6: Commit**
 
@@ -2109,6 +2164,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     '        policy=sdk.RuntimePolicy(observable="hamiltonian"),\n', ""
 )
@@ -2116,7 +2172,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_the_hamiltonian_reaches_the_objective` — the run converges to `-1.0` instead of `-2.236`. If it passes, the policy is being set somewhere else and this tool is not the thing under test.
@@ -2129,6 +2185,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     '        "final_loss": final_loss,',
     '        "final_loss": float(result.losses[-1]),',
@@ -2137,7 +2194,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k final_loss -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before`.
@@ -2151,6 +2208,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "    _check_budget(ir, steps)\n\n    names = parameter_names(ir)",
     "\n    names = parameter_names(ir)",
@@ -2162,7 +2220,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k budget -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/training.py.mutbak src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_a_run_past_the_budget_is_refused_before_any_work_starts`.
@@ -2606,6 +2664,7 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/server.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "        values=values,\n        steps=steps,\n        learning_rate=learning_rate,\n",
     "        steps=steps,\n        learning_rate=learning_rate,\n",
@@ -2614,7 +2673,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_tool_wiring.py -q
-cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/server.py
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server" && mv src/flagquantum_mcp_server/server.py.mutbak src/flagquantum_mcp_server/server.py
 ```
 
 Expected: FAIL on the `train_parameters_tool` case, because the starting values no longer reach the optimizer.
@@ -2732,12 +2791,13 @@ python3 - <<'PY'
 from pathlib import Path
 p = Path("tests/test_api_contract.py")
 before = p.read_text()
+Path(str(p) + ".mutbak").write_text(before)
 after = before.replace('("flagquantum.algorithms", "Hamiltonian"),', '("flagquantum.algorithms", "HamiltonianX"),')
 assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_dependencies -q
-git checkout tests/test_api_contract.py
+mv tests/test_api_contract.py.mutbak tests/test_api_contract.py
 ```
 
 Expected: FAIL before the restore.
