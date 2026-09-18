@@ -73,44 +73,73 @@ This is the same silent failure `circuits.py` already refuses at the JSON
 boundary, and it is why the replay reads names through `circuit_from_ir` rather
 than from the raw instruction list.
 
-**It converges.** A four-qubit layered ansatz against a transverse-field Ising
-Hamiltonian: loss `+0.9527 → −1.0000` in 100 steps, 0.10 s.
+**A `hamiltonian` argument is ignored unless the policy asks for it.** This is
+the finding that decides whether the tool is worth building at all.
+`Module(hamiltonian=H)` stores `H` and then does not use it: the value comes from
+`RuntimePolicy.observable`, whose default is `"z"` with `observable_wires=(0,)`.
+Measured, with a `ry(θ)` circuit and θ = 0.7:
+
+| Hamiltonian | policy | value | correct? |
+| --- | --- | --- | --- |
+| `1.0·Z` | default | 0.7648 | yes, by accident |
+| `1.0·X` | default | 0.7648 | **no** — that is ⟨Z⟩, not ⟨X⟩ = 0.6442 |
+| `1.0·Z + 2.0·Z` | default | 0.7648 | **no** — that is ⟨Z⟩, not 3⟨Z⟩ = 2.2945 |
+| no Hamiltonian | default | 0.7648 | — |
+| `1.0·X` | `observable="hamiltonian"` | 0.6442 | yes |
+| `1.0·Z + 0.5·X` | `observable="hamiltonian"` | 1.0870 | yes |
+| `2.0·Z − 1.0·X` | `observable="hamiltonian"` | 0.8855 | yes |
+
+So the policy is part of the request, and a design that omitted it would train
+⟨Z₀⟩ to convergence and report it as an energy. The earlier version of this
+document did exactly that: its four-qubit "TFIM" run reached −1.0000, which is
+the minimum of ⟨Z₀⟩ and not a property of the Hamiltonian it named. With the
+policy set, the same ansatz reaches −4.7562 against an exact ground energy of
+−4.7588.
+
+**It converges, against the objective it was given.** A four-qubit layered
+ansatz against a transverse-field Ising Hamiltonian
+(`−Σ ZᵢZᵢ₊₁ + Σ Xᵢ`): loss `−2.8185 → −4.7562` in 300 steps, 0.71 s, against an
+exact ground energy of `−4.7588`.
 
 **`Module` requires static circuit topology** — it traces the builder with
 `make_fx` and refuses a builder that branches on tensor values. A serialized
 ansatz satisfies this by construction.
 
-**The objective is fixed.** With `hamiltonian=H`, `ExecutionResult.value` *is*
+**The objective is fixed.** With `hamiltonian=H` and
+`policy=RuntimePolicy(observable="hamiltonian")`, `ExecutionResult.value` *is*
 the energy expectation. A JSON interface cannot carry a callable, and it does
 not need to: the objective is the Hamiltonian expectation and nothing else.
 
 **Cost is a different order of magnitude from `simulate`.**
 
-Per step, warm, on an `ry`/`cx`/`rz` ansatz with one Hamiltonian term per wire.
-One layer of that ansatz has `3n - 1` instructions.
+Per step, warm, on an `ry`/`cx`/`rz` ansatz against a transverse-field Ising
+Hamiltonian (`−Σ ZᵢZᵢ₊₁ + Σ Xᵢ`, one term per wire and one per bond). One layer
+of that ansatz has `3n - 1` instructions; `n_instructions` below is the real
+count, which for the four-layer rows is `12n - 4`.
 
-| width | instructions | per step | 100 steps |
-| --- | --- | --- | --- |
-| 4 qubits | 11 | 2.1 ms | 0.2 s |
-| 8 qubits | 23 | 4.1 ms | 0.4 s |
-| 12 qubits | 35 | 4.2–7.2 ms | 0.7 s |
-| 16 qubits | 47 | 32–38 ms | 3.5 s |
-| 20 qubits | 59 | 583 ms | 58 s |
-| 24 qubits | 71 | 23 s | 38 min |
+| width | layers | instructions | per step | 100 steps |
+| --- | --- | --- | --- | --- |
+| 4 | 1 | 11 | 1.8 ms | 0.2 s |
+| 8 | 1 | 23 | 4.1 ms | 0.4 s |
+| 12 | 1 | 35 | 9.0 ms | 0.9 s |
+| 16 | 1 | 47 | 85 ms | 8.5 s |
+| 16 | 4 | 188 | 147 ms | 15 s |
+| 20 | 1 | 59 | 1.29 s | 2.2 min |
+| 22 | 1 | 65 | 8.6 s | 14 min |
+| 24 | 1 | 71 | 68 s | 1.9 h |
 
 Two costs, and both are visible in that table. At small widths the per-step
-cost is nearly flat and dominated by dispatch — ~2 ms whatever the width. Past
-16 qubits the state the SDK carries takes over and grows as `2 ** n_wires`. Gate
-count matters too, in both regimes: at 16 qubits, four layers cost 116 ms/step
-against one layer's 38 ms.
+cost is nearly flat and dominated by dispatch. Past 12 qubits the state the SDK
+carries takes over and grows as `2 ** n_wires`. Gate count matters too, in both
+regimes: at 16 qubits, four layers cost 147 ms/step against one layer's 85 ms.
 
 A first call in a fresh process additionally pays ~0.5 s once, tracing the
 builder with `make_fx`. That is why an unpractised measurement looks like a flat
 ~20 ms/step at small widths: the startup landed on 20 steps.
 
 `simulate_circuit_tool`'s worst case at the existing bound is 2.4 s. Training
-at 24 qubits is 38 minutes. That difference is the whole reason this design has
-a budget model.
+at 24 qubits is nearly two hours for a hundred steps. That difference is the
+whole reason this design has a budget model.
 
 ## Interface
 
@@ -119,21 +148,36 @@ One new tool, one new module.
 ```
 train_parameters_tool(
     circuit: str,
+    hamiltonian: Sequence[Mapping[str, Any]],        # required, so no default
     circuit_format: CircuitFormat = "ir",
-    hamiltonian: Sequence[Mapping[str, Any]],        # required
     values: Mapping[str, float] | None = None,       # initial, defaults to zeros
     steps: int = 50,
     learning_rate: float = 0.1,
 ) -> dict
 ```
 
+`hamiltonian` comes before the defaulted arguments because it has no default.
+That is a deliberate break with the other tools' `circuit, circuit_format`
+opening: putting it after `circuit_format` would give it a default and make it
+optional in the schema, and the whole point is that a caller cannot call this
+without an objective.
+
 `hamiltonian` takes the **same `terms` shape** `outputs` already uses —
 `[{"pauli": "ZZZZ", "coefficient": 1.0}, ...]`, one letter per wire — so the
-two are one concept with one spelling, and the builder is shared with
-`planning.py` rather than reimplemented.
+two are one concept with one spelling, and the validation is shared with
+`planning.py` rather than reimplemented. The same shape means the same refusals,
+including the one for an all-identity term.
 
-`hamiltonian` is required. There is no sensible default: without one the value
-is not an energy and training it would minimise an unnamed quantity.
+`hamiltonian` is required, and required *in the schema*: it is declared without
+a default, which puts it in FastMCP's `required` list, and it is also refused at
+run time for callers that reach the module directly. There is no sensible
+default — without one the value is not an energy and training it would minimise
+an unnamed quantity.
+
+The `RuntimePolicy` is not a caller-facing argument. It is set to
+`observable="hamiltonian"` by the tool, always, because that is the only setting
+under which the `hamiltonian` argument is read at all. Exposing it would offer a
+caller a way to disable the objective they just supplied.
 
 `values` defaults to zeros, and **the result reports the values it started
 from**, so a starting point is never implicit.
@@ -143,13 +187,13 @@ Returns, in the shape the session that needed it would want:
 ```json
 {
   "status": "success",
-  "initial_loss": 0.9527,
-  "final_loss": -0.9996,
-  "losses": [0.9527, 0.9004, "..."],
-  "completed_steps": 50,
-  "parameters": {"t0": 0.31, "u0": -1.2},
-  "initial_parameters": {"t0": 0.0, "u0": 0.0},
-  "circuit": {"n_qubits": 4, "n_instructions": 11, "content_hash": "..."},
+  "initial_loss": -2.81850,
+  "final_loss": -4.75616,
+  "losses": [-2.81850, -3.10044, "..."],
+  "completed_steps": 300,
+  "parameters": {"t0_0": 1.5733, "u0_3": -0.0945},
+  "initial_parameters": {"t0_0": 0.05, "u0_3": 0.05},
+  "circuit": {"n_qubits": 4, "n_instructions": 20, "content_hash": "..."},
   "execution": {"execution_path": "local_statevector", "...": "..."}
 }
 ```
@@ -157,11 +201,21 @@ Returns, in the shape the session that needed it would want:
 `parameters` is written in the `bind_parameters_tool`/`values` spelling, so the
 continuation loop is mechanical: call again with `values=parameters`.
 
+**`losses[k]` is the loss the parameters entered step `k+1` with**, because the
+SDK evaluates before it updates. So `losses[0]` is the loss at the submitted
+`values`, and `losses[-1]` is *not* the loss of the parameters being returned —
+it is the loss one update earlier. `final_loss` therefore comes from one extra
+forward evaluation at the returned parameters, which is what makes the
+continuation exact: feed `parameters` back as `values` and the next call's
+`initial_loss` is this call's `final_loss`. Reporting `losses[-1]` as
+`final_loss` would cost nothing and quietly break that promise, and a caller
+watching a curve would see it step backwards on resume.
+
 ## The replay layer (new module `training.py`)
 
 - `parameter_names(ir)` — the circuit's own names, from
   `circuit_from_ir(ir).parameter_names`. Sorted by the SDK, each name once.
-- `replay_builder(ir, names)` — returns the callable `Module` traces. For each
+- `replay_builder(ir)` — returns the callable `Module` traces. For each
   instruction it calls `Circuit.gate(name, wires, params=..., matrix=...)`,
   substituting `parameters[name][0]` for each symbolic argument and passing
   every other value through unchanged.
@@ -176,54 +230,69 @@ hold SDK types a JSON tool has no business inspecting.
 ## Budget model
 
 A prediction decides before any work starts, because the alternative is a
-stdio session that hangs for fifteen minutes with the client blocked.
+stdio session that hangs for an hour with the client blocked.
 
 ```
-startup         ≈ 0.5                                     seconds, once
-per_step        ≈ max(0.01, n_instructions × 2 ** n_wires × 3e-8)
+startup         ≈ 0.5                                      seconds, once
+per_step        ≈ max(0.02, n_instructions × 2 ** n_wires × 1e-7)
 predicted_total ≈ startup + steps × per_step
 ```
 
 Two terms, because cost has two regimes, and each term is the cost it models
 rather than a fitted fudge. `startup` is the `make_fx` trace, paid once per
 process. `per_step` is work per step: gates applied against a state of
-`2 ** n_wires` amplitudes, so it is the product of the two. The `0.01` floor is
-dispatch — ~2 ms measured, rounded up — which is what dominates at small widths.
-The constant `3e-8` is the only calibrated number: the largest measured point is
-71 instructions × 2²⁴ states at 23 s per step, which gives 1.9e-8, rounded up to
-3e-8.
+`2 ** n_wires` amplitudes, so it is the product of the two. The `0.02` floor is
+dispatch, measured at 1.8 ms at 4 qubits and 9 ms at 12, rounded up. The `1e-7`
+is the only calibrated number.
 
-Checked against every measurement above, and against the cold first call:
+Checked against every measurement in the table above, plus the cold first call:
 
 | width | layers | steps | predicted | measured | over by |
 | --- | --- | --- | --- | --- | --- |
-| 4 | 1 | 20, cold | 0.70 s | 0.50 s | 1.4× |
-| 4 | 1 | 20 | 0.70 s | 0.04 s | 17× |
-| 8 | 1 | 20 | 0.70 s | 0.08 s | 8.5× |
-| 12 | 1 | 20 | 0.70 s | 0.14 s | 4.9× |
-| 12 | 4 | 20 | 0.84 s | 0.25 s | 3.3× |
-| 16 | 1 | 20 | 2.35 s | 0.76 s | 3.1× |
-| 16 | 4 | 20 | 7.89 s | 2.31 s | 3.4× |
-| 20 | 1 | 20 | 37.6 s | 11.7 s | 3.2× |
-| 24 | 1 | 2 | 72.0 s | 46.0 s | 1.6× |
+| 4 | 1 | 20, cold | 0.90 s | 0.50 s | 1.8× |
+| 4 | 1 | 20 | 0.90 s | 0.036 s | 25× |
+| 8 | 1 | 20 | 0.90 s | 0.082 s | 11× |
+| 12 | 1 | 20 | 0.90 s | 0.18 s | 5.0× |
+| 12 | 4 | 20 | 1.65 s | 0.31 s | 5.3× |
+| 16 | 1 | 20 | 6.66 s | 1.70 s | 3.9× |
+| 16 | 4 | 20 | 25.1 s | 2.93 s | 8.6× |
+| 20 | 1 | 20 | 124 s | 25.8 s | 4.8× |
+| 22 | 1 | 2 | 55.1 s | 17.1 s | 3.2× |
+| 24 | 1 | 1 | 119.6 s | 68.5 s | 1.7× |
 
 Every row over-predicts, which is the direction that matters: a refusal that
-sometimes declines work that would have fit is a better failure than a call that
-blocks for an hour. The worst case for the decision is the last row, where the
-margin is 1.6× rather than 3× — at 24 qubits the `0.5 s` startup is noise
-against 71 s of work, so the whole prediction rests on the `3e-8` coefficient,
-and the two-step measurement it was calibrated from is the one row with no
-repetition behind it.
+sometimes declines work that would have fitted is a better failure than a call
+that blocks for an hour. The margins run from 1.7× to 25×, and the shape of that
+spread is honest — the model is a straight line through a curve, it is closest
+at the top where the state cost dominates and the constant was calibrated, and
+farthest at the bottom where the floor it uses (20 ms) is ten times the dispatch
+it actually measured (1.8 ms). A tighter floor would fit the small widths better
+and buy nothing: at a 60 s budget the floor is what lets a 4-qubit caller ask for
+three thousand steps instead of thirty thousand, and three thousand is already
+past the number anyone will read.
 
-A first draft of this model had only a `2 ** n_wires` term and a `0.02` floor,
+The same straight line is why the last row's margin is the thinnest. The
+per-state cost is not constant across the whole range — it falls from 1.0e-5 per
+instruction-state at 4 qubits to 2.1e-8 at 20, then rises again to 5.7e-8 at 24
+as the state (134 MB of `complex64`) stops fitting where it used to. A single
+coefficient cannot follow that, so `1e-7` is chosen to clear the highest point
+rather than the average one, and it over-predicts 3–5× through the middle to do
+it. An earlier draft of this model used `3e-8`, which was calibrated at 20
+qubits and under-predicted 24 by 2.4×.
+
+A still earlier draft had only a `2 ** n_wires` term and a `0.02` floor,
 calibrated from cold measurements where the one-time trace had been divided
 across the steps. It under-predicted at 16 qubits, and its stated table did not
 reproduce: re-measuring warm gave 4 ms/step at 8 qubits where the draft said 20.
-The model above is the one that survives being checked line by line.
 
 If `predicted_total > FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` (default 60), the tool
 refuses and names the prediction, the width, the steps, and the variable that
 raises the bound.
+
+**At 24 qubits that refusal is total.** One step is 68 s, so no request above the
+default budget survives it — which is the right answer, but it is worth stating
+that the tool is not usable at the top of the width range the other tools
+support, rather than leaving a caller to discover it from a wall of arithmetic.
 
 The description says this is an estimate rather than a measurement of the
 caller's machine.
@@ -247,13 +316,19 @@ Each is a case where accepting would produce a plausible-looking answer.
 - the replay rebuilds a numeric circuit byte for byte, matrix gate included
 - the replayed circuit evaluates to the same energy as the source circuit bound
   with the same numbers
+- **the Hamiltonian reaches the objective**: on a circuit whose ⟨Z₀⟩ optimum and
+  whose Hamiltonian optimum differ, training moves the energy toward the
+  Hamiltonian's. This is the test that would have caught the policy trap, and it
+  is the one test here that a plausible implementation fails.
 - training reduces the loss on a circuit whose optimum is known
 - the returned `parameters` fed back as `values` continues rather than restarts
 - each refusal above, asserting on the message and not only the code
 - the budget refusal fires **before** the run: assert the wall clock stays small
 - every new assertion mutation-tested, per AGENTS.md
 
-## The dependency this needs, and why it is allowed
+## The dependencies this needs, and why they are allowed
+
+Two SDK objects are outside the frozen snapshot.
 
 `Module(hamiltonian=...)` takes a `flagquantum.algorithms.Hamiltonian`. That
 class:
@@ -262,16 +337,35 @@ class:
 - is **not** named in any capability's `public_apis`;
 - is **not** reachable as `flagquantum.Hamiltonian`.
 
-So it is tier 3: public, not frozen. AGENTS.md rule 3 admits tier 3 when there
+`RuntimePolicy` is reachable as `flagquantum.RuntimePolicy` but is likewise not
+in `stable_exports` and not named in any capability's `public_apis`. Without it
+the Hamiltonian is ignored, so it is not optional.
+
+Both are tier 3: public, not frozen. AGENTS.md rule 3 admits tier 3 when there
 is a reason and the names are pinned by a test, which is the situation here —
-there is no other way to express the objective. The names go into the tier-3
-table in `tests/test_api_contract.py` in the same change.
+there is no other way to express the objective, and no other way to make the SDK
+read it. The names go into the tier-3 table in `tests/test_api_contract.py` in
+the same change.
+
+`torch` is reached through the SDK rather than imported directly — the server
+declares two dependencies and `torch` is not one of them — even though
+`fq.train` takes a `torch.optim.Optimizer` and there is no way to call it
+without one.
 
 **This is an upstream gap worth recording.** `Module`'s own signature references
 a type from a module the capability manifest does not declare, so a caller
 following the manifest cannot construct the objective for the capability the
 manifest advertises. `run_vqe`, `hardware_efficient_ansatz` and
 `transverse_field_ising` are in the same position.
+
+The larger gap is the policy. `Module(hamiltonian=H)` accepts `H`, stores it,
+exposes it as `.hamiltonian`, and then evaluates something else, because which
+observable a `Module` measures is governed by a separate object whose default is
+`⟨Z₀⟩`. Nothing warns. A caller who reads `train`'s docstring — whose example
+passes no `hamiltonian` at all — builds a variational loop that converges
+cleanly on the wrong quantity. This server cannot fix that; it can decline to
+reproduce it, and the test that the Hamiltonian reaches the objective is what
+makes that a property rather than an intention.
 
 ## What this deliberately does not do
 
