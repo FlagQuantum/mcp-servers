@@ -27,6 +27,17 @@
   so a checkout would discard the task's own work along with the mutation,
   leaving a tree that is neither mutated nor implemented. If you see a `.mutbak` file still on disk at
   the end of a task, the restore did not run.
+- **A restore is not complete until `__pycache__` is cleared, and this was
+  measured rather than reasoned.** `Path.replace` gives the restored file the
+  *sidecar's* mtime, and a `.pyc` records its source's mtime truncated to whole
+  seconds. A length-preserving mutation restored inside that same second
+  therefore matches the mutant `.pyc` and is a cache hit on it: the source on
+  disk reads correctly while the interpreter keeps running the mutant. Probed
+  directly — source `VALUE = 111`, mutant `999`, restore, `reload` → `999`.
+  So run `find . -name __pycache__ -type d -exec rm -rf {} +` immediately after
+  every `.replace(...)`, and before you believe any red or green that follows a
+  restore. This is the fourth distinct way a mutation has been left applied
+  while appearing reverted; the other three are above.
 - Dependency range is `flagquantum>=0.2,<0.3` and `fastmcp>=3.2.0,<4`. Do not add a third declared dependency; `torch` is reached through the SDK.
 - No network egress, no credentials, no hardware. Every tool runs locally and deterministically.
 - Tools never raise across the MCP boundary; a failure returns `{"status": "error", "error": {"code": ..., "message": ...}}`.
