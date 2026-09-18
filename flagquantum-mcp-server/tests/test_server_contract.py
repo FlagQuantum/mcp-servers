@@ -13,7 +13,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ValidationError
 
 from flagquantum_mcp_server.server import mcp
-from tests.conftest import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
+from tests.surface import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
 
 pytestmark = pytest.mark.unit
 

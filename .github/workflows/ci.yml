@@ -140,13 +140,16 @@ jobs:
           proc.wait(timeout=30)
 
           assert info["name"] == "FlagQuantum", info
-          # The surface is declared once, in tests/conftest.py, and read here
+          # The surface is declared once, in tests/surface.py, and read here
           # rather than counted again. It used to be a literal in three places,
           # so adding a tool left this one to go stale silently — which is
           # exactly what happened. This step still earns its place: it proves
           # the *built wheel* serves the same surface the source does.
           import sys; sys.path.insert(0, "flagquantum-mcp-server")
-          from tests.conftest import EXPECTED_TOOLS
+          # From tests/surface.py, which imports nothing: this environment has
+          # the wheel and no development dependencies, so a declaration that
+          # pulled in pytest would fail here rather than check the wheel.
+          from tests.surface import EXPECTED_TOOLS
           served = {tool["name"] for tool in tools}
           assert served == set(EXPECTED_TOOLS), sorted(served ^ set(EXPECTED_TOOLS))
           assert proc.returncode == 0, proc.stderr.read()

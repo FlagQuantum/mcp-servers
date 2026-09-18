@@ -32,50 +32,6 @@ ANGLED_QIR = [
     {"name": "cx", "index": [0, 1]},
 ]
 
-# The server's published surface, declared once.
-#
-# It used to exist in three unlinked places — an in-process contract test, an
-# over-stdio process test, and a ``len(tools) == N`` assertion in the CI
-# workflow — so adding a tool turned two of them red and left the third to fail
-# a release later. The CI script now imports this module rather than counting
-# for itself, and both tests read it, so there is one thing to update.
-EXPECTED_TOOLS = frozenset(
-    {
-        "analyze_circuit_tool",
-        "serialize_circuit_tool",
-        "deserialize_circuit_tool",
-        "optimize_circuit_tool",
-        "route_circuit_tool",
-        "compare_topologies_tool",
-        "emit_openqasm_tool",
-        "emit_qcis_tool",
-        "plan_execution_tool",
-        "simulate_circuit_tool",
-        "describe_gate_set_tool",
-        "inspect_parameters_tool",
-        "bind_parameters_tool",
-        "describe_layers_tool",
-        "describe_topology_tool",
-        "draw_circuit_tool",
-    }
-)
-
-EXPECTED_RESOURCES = frozenset(
-    {
-        "flagquantum://version",
-        "flagquantum://gate-set",
-        "flagquantum://ir-schema",
-    }
-)
-
-EXPECTED_PROMPTS = frozenset(
-    {
-        "build_and_analyze_circuit",
-        "compile_for_topology",
-        "export_circuit",
-    }
-)
-
 
 @pytest.fixture
 def bell_qir() -> str:

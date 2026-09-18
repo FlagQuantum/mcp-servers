@@ -14,7 +14,7 @@ import pytest
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport
 
-from tests.conftest import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
+from tests.surface import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
 
 pytestmark = pytest.mark.integration
 
