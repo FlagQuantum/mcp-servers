@@ -236,7 +236,7 @@ def _check_pauli_string(pauli: str, *, n_wires: int, where: str | None = None) -
             f"{subject} {pauli!r} is entirely identity, which is not a measurable "
             "observable. Drop the term, or name a wire it acts on."
         )
-
+```
 
 **`_pauli_observable` is not reproduced here and is not edited.** Its
 signature keeps `where: str | None = None` and its body keeps every check it
@@ -246,14 +246,13 @@ matters:
 
 1. It is already correct. The `where` parameter arrived with `terms` in 0.2.0,
    and the single-pauli path through `_build_output` depends on it.
-2. A `terms` entry now passes two checks — `_weighted_term`'s, which names
+2. A `terms` entry now passes two checks: `_weighted_term`'s, which names
    `terms[i]`, and this one, which fires only if the first did not. The second
    cannot fire for a `terms` call. It costs one length comparison and it keeps
    the refusal inside the function that owns the string, which is worth more
    than the branch it saves. The Step 4 mutation is what shows the outer check
    is the one carrying the location, and that is the only observable
    difference between them.
-```
 
 **Leave `_build_output` alone.** Its single-pauli path calls
 `_pauli_observable(pauli, n_wires=n_wires)` and keeps every refusal it has today,
@@ -2191,11 +2190,14 @@ a float can hold makes `math.isfinite` raise `OverflowError` rather than return
 `False` — so `learning_rate=10**400` escaped the guard as an internal error.
 Measured, both before and after the `isfinite` fix. The list is now:
 
+... the decorator on `test_a_learning_rate_adam_cannot_use_is_refused` becomes:
+
 ```python
 @pytest.mark.parametrize(
     "rate",
     [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf"), 10**400],
 )
+def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None: ...
 ```
 
 - [ ] **Step 2: Run them to verify they fail**
@@ -2945,7 +2947,6 @@ def _in_this_tools_vocabulary(message: str) -> str:
         message.replace("terms[", "hamiltonian[")
         .replace("An expectation needs", "An objective needs")
         .replace("This expectation carries", "This objective carries")
-    )
     )
 ```
 
