@@ -160,3 +160,14 @@ written against an implementation that is already correct will pass whether or
 not it asserts anything — this repository has shipped exactly that mistake once,
 with twenty-two cases that all passed while checking nothing, and only a
 deliberate mutation revealed it.
+
+**This applies to the release path too, where the failure is more expensive.**
+The registry workflow's last step asserted that *some* version of this server
+is listed. That is true from the first release onward and cannot fail
+afterwards, so it never checked anything — and it was also written to ask once,
+with a 30-second timeout, against an endpoint measured at 18–38 seconds. On the
+0.2.0 release both faults landed at once: the publish succeeded, the check
+timed out, and the run went red on a release that worked. A red publish is the
+most expensive kind of false alarm, because the obvious response is to publish
+again. A verification step on this path must name the version it expects and
+must be able to fail.

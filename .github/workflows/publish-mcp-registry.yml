@@ -78,24 +78,53 @@ jobs:
         working-directory: ${{ inputs.package }}
         run: mcp-publisher publish
 
-      - name: Confirm the listing resolves
+      - name: Confirm the version is listed
         working-directory: ${{ inputs.package }}
         run: |
           python - <<'PY'
-          import json, pathlib, urllib.request
+          import json, pathlib, time, urllib.error, urllib.request
 
-          name = json.loads(pathlib.Path("server.json").read_text(encoding="utf-8"))["name"]
+          manifest = json.loads(pathlib.Path("server.json").read_text(encoding="utf-8"))
+          name = manifest["name"]
+          version = manifest["version"]
           url = f"https://registry.modelcontextprotocol.io/v0.1/servers?search={name}"
-          with urllib.request.urlopen(url, timeout=30) as response:
-              payload = json.load(response)
 
-          servers = payload.get("servers", [])
-          versions = [
-              entry["server"]["version"]
-              for entry in servers
-              if entry["server"]["name"] == name
-          ]
-          if not versions:
-              raise SystemExit(f"{name} is not listed in the registry")
-          print(f"registry lists {name} at {sorted(versions)}")
+          # Two things were wrong with this step, and the second is the worse
+          # of them.
+          #
+          # It asked once, with a 30 second timeout, against an endpoint whose
+          # reads were measured at 18-38 seconds. It went red on a publish that
+          # had already succeeded -- `mcp-publisher` printed "Successfully
+          # published" one step earlier -- which is the most expensive kind of
+          # false failure, because the obvious response is to publish again.
+          #
+          # And it asserted only that *some* version of this server is listed.
+          # That is true the moment the first release lands and stays true
+          # forever after, so it has never once checked what it is named for.
+          # It asserts the declared version now.
+          deadline = time.monotonic() + 300
+          while True:
+              try:
+                  with urllib.request.urlopen(url, timeout=90) as response:
+                      payload = json.load(response)
+                  listed = {
+                      entry["server"]["version"]
+                      for entry in payload.get("servers", [])
+                      if entry["server"]["name"] == name
+                  }
+              except (urllib.error.URLError, TimeoutError, OSError) as exc:
+                  listed = set()
+                  print(f"transient error, retrying: {exc}")
+              if version in listed:
+                  print(f"registry lists {name} at {version}")
+                  break
+              if time.monotonic() > deadline:
+                  raise SystemExit(
+                      f"timed out confirming {name} {version} in the registry; "
+                      f"versions seen: {sorted(listed)}. The publish step "
+                      "reported success before this check ran, so confirm the "
+                      "listing before republishing."
+                  )
+              print(f"{version} not listed yet (saw {sorted(listed)}), retrying")
+              time.sleep(15)
           PY
