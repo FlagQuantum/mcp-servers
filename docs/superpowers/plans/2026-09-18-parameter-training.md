@@ -2941,14 +2941,18 @@ def _in_this_tools_vocabulary(message: str) -> str:
     and after anchoring the caller's literal survives intact in every position it
     can occupy.
 
-    **One phrase is left unanchored, and it is the residual.** ``An expectation
-    needs`` sits mid-sentence with no fixed position to key on, so a caller whose
-    own value is the literal string ``An expectation needs a term`` still has it
-    echoed as ``An objective needs a term``. It is pinned by a test that asserts
-    the defective behaviour on purpose. The alternative — teaching the shared
-    validator to take its nouns as parameters — would change an interface that
-    the ``expectation`` output path also uses, to fix a message about an input no
-    caller will send. Recorded, not fixed, with the reasoning in the test.
+    **No residual remains, and the reason the last one was left is worth
+    keeping.** ``An expectation needs`` has no message prefix to anchor on — it
+    sits mid-sentence — so an earlier version of this function replaced it
+    outright, and a caller whose own value was those words had them rewritten.
+    The reasoning recorded at the time was that there was "no position to anchor
+    it to". **That was false, and in the same way the previous one was false:**
+    the phrase appears in exactly one SDK message, always immediately after
+    ``empty. ``, which is a position. Measured, anchoring on that context
+    rewrites the SDK's copy and leaves a caller's literal intact, with the
+    property test still green. The lesson is that "there is nothing to anchor on"
+    is a claim about the messages, and it needs the messages read rather than
+    recalled.
 
     The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
@@ -2967,7 +2971,15 @@ def _in_this_tools_vocabulary(message: str) -> str:
         message = "hamiltonian" + message[len("terms") : close + 1] + message[close + 1 :]
     if message.startswith("This expectation carries"):
         message = "This objective carries" + message[len("This expectation carries") :]
-    return message.replace("An expectation needs", "An objective needs")
+    return message.replace(
+        # The SDK writes this phrase in exactly one message, always directly
+        # after "empty. ": "'terms' is empty. An expectation needs at least one
+        # term". A caller's copy of the same words arrives inside a quoted value
+        # — "is a string ('An expectation needs a term')" — so a context longer
+        # than the bare phrase tells the two apart where the phrase alone cannot.
+        "empty. An expectation needs",
+        "empty. An objective needs",
+    )
 ```
 
 Then change the call in `train_parameters`. Replace exactly this line:
@@ -3110,35 +3122,36 @@ def test_a_literal_is_echoed_unchanged_in_every_position_it_can_occupy() -> None
         assert f"'{rewritten}'" not in message, (objective, message)
 
 
-def test_a_phrase_shaped_literal_is_the_one_recorded_residual() -> None:
-    """The single input the rename still gets wrong, written down as a test.
+def test_the_phrase_shaped_message_is_renamed_without_touching_a_caller_literal() -> None:
+    """The last pattern with no message prefix, and the two messages it must tell apart.
 
-    ``An expectation needs`` is the one pattern with no position to anchor on: it
-    sits mid-sentence inside ``'terms' is empty. An expectation needs at least
-    one term``, and a caller whose own value is that phrase therefore has it
-    echoed as ``An objective needs``.
+    ``An expectation needs`` sits mid-sentence, so it cannot be anchored to the
+    start of a message the way the other three patterns are. It appears in
+    exactly one SDK message, always directly after ``empty. `` — and a caller who
+    passes the same words as a value gets them inside ``is a string ('...')``.
+    Anchoring on the longer context rewrites the SDK's copy and leaves the
+    caller's alone.
 
-    This asserts the defective behaviour on purpose, so the residual is a fact in
-    the suite rather than a sentence in a docstring, and so anyone who fixes it
-    gets a red test telling them what changed. **This is the test to delete if
-    the rename is ever rebuilt to take the nouns as parameters** — which is the
-    real fix, and is exactly why it is not done here: it would change an
-    interface the ``expectation`` output path shares, to correct a message about
-    an input no caller will send.
+    This replaced a test that asserted the *defect* here, on the recorded belief
+    that there was no position to anchor on. The belief was wrong and the test
+    caught it: it went red the moment the anchor was added, which is what a
+    tripwire is for.
     """
     from flagquantum_mcp_server.training import train_parameters
 
-    with pytest.raises(ToolInputError) as caught:
-        train_parameters(
-            ANGLED,
-            [{"pauli": "ZZ", "coefficient": "An expectation needs a term"}],
-            "qir",
-            steps=1,
-        )
+    with pytest.raises(ToolInputError) as empty:
+        train_parameters(ANGLED, [], "qir", steps=1)
 
-    message = str(caught.value)
-    assert "('An objective needs a term')" in message, message
-    assert "('An expectation needs a term')" not in message, message
+    assert "An objective needs" in str(empty.value), str(empty.value)
+    assert "An expectation needs" not in str(empty.value), str(empty.value)
+
+    phrase = "An expectation needs a term"
+    with pytest.raises(ToolInputError) as quoted:
+        train_parameters(ANGLED, [{"pauli": "ZZ", "coefficient": phrase}], "qir", steps=1)
+
+    message = str(quoted.value)
+    assert f"('{phrase}')" in message, message
+    assert "('An objective needs a term')" not in message, message
 
 
 def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
@@ -3176,8 +3189,8 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. **The def count is unchanged at 49 and the collected count rises
-to 62.** This round deletes one test and adds two, but one of the two is
+Expected: PASS. **The def count is unchanged at 49 and the collected count stays
+at 62.** This round deletes one test and adds two, but one of the two is
 parametrized over six cases, so the collected total moves by more than the def
 total does. Read both numbers off the run rather than assuming either:
 
