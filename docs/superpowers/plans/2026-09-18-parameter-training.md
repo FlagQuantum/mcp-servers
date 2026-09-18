@@ -2126,7 +2126,9 @@ def test_a_run_past_the_budget_is_refused_before_any_work_starts(
 
     assert time.perf_counter() - started < 1.0, "the refusal did no work"
     message = str(caught.value)
-    assert "16" in message
+    # "16-qubit", not "16": the predicted seconds and the instruction count are
+    # both in this message, and either could contain "16" by coincidence.
+    assert "16-qubit" in message
     assert "5000" in message
     assert "FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS" in message
 
@@ -2155,6 +2157,7 @@ name here is used by this task's code, and `ruff`'s `F401` will say so if one is
 not:
 
 ```python
+import math
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
@@ -2308,6 +2311,7 @@ def _check_learning_rate(learning_rate: Any) -> None:
     if (
         isinstance(learning_rate, bool)
         or not isinstance(learning_rate, (int, float))
+        or not math.isfinite(learning_rate)
         or learning_rate <= 0
     ):
         raise ToolInputError(
@@ -2409,9 +2413,14 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
     resolved: dict[str, float] = {}
     for name in names:
         value = values[name]
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+        ):
             raise ToolInputError(
-                f"values[{name!r}] is {value!r}; every starting value must be a real number."
+                f"values[{name!r}] is {value!r}; every starting value must be a "
+                "finite real number."
             )
         resolved[name] = float(value)
     return resolved
@@ -2678,6 +2687,22 @@ def test_an_empty_hamiltonian_is_refused() -> None:
     assert "'terms'" not in message
 
 
+def test_a_non_finite_starting_value_is_refused() -> None:
+    """NaN reaches the optimizer and comes back as a successful run of NaN.
+
+    Measured: without this refusal, ``values={"t0": nan}`` returns
+    ``status: "success"`` with every loss and every returned parameter NaN.
+    ``json.loads`` accepts the ``NaN`` and ``Infinity`` tokens, so a payload
+    carrying one is not rejected before it gets here.
+    """
+    from flagquantum_mcp_server.training import train_parameters
+
+    with pytest.raises(ToolInputError) as caught:
+        train_parameters(ANGLED, TFIM2, "qir", values={"t0": float("nan"), "t1": 0.1})
+
+    assert "t0" in str(caught.value)
+
+
 def test_a_value_for_a_parameter_the_circuit_does_not_have_is_refused() -> None:
     """The typo case: silently ignored, the parameter trains from zero."""
     from flagquantum_mcp_server.training import train_parameters
@@ -2718,7 +2743,7 @@ def test_a_step_count_the_loop_cannot_use_is_refused(steps: object) -> None:
     assert "steps" in str(caught.value)
 
 
-@pytest.mark.parametrize("rate", [0, 0.0, -0.1, True, "0.1"])
+@pytest.mark.parametrize("rate", [0, 0.0, -0.1, True, "0.1", float("nan"), float("inf")])
 def test_a_learning_rate_adam_cannot_use_is_refused(rate: object) -> None:
     from flagquantum_mcp_server.training import train_parameters
 
@@ -3253,9 +3278,11 @@ Two limits are worth knowing before you call it. Training is far more expensive
 than simulating — measured, a 16-qubit step costs 85 ms against a simulation's
 few milliseconds — so a run is refused up front when its predicted cost exceeds
 `FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS`, with the prediction, the width and the step
-count in the message. At 24 qubits a single step is 68 seconds, which means the
-budget refuses every run at that width; train narrower circuits and simulate
-wide ones.
+count in the message. The cost that dominates at the top of the width range is
+holding the state: 25 s per step at 24 wires before a single gate is applied, so
+no 24-wire circuit gets more than two steps, and the layered ansatz measured here
+— 71 instructions, 119 s per step — gets none. That is a statement about the
+circuit, not about the width: one gate at 24 wires is still under the budget.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run
 converged is your reading, not this tool's claim, and the SDK's
