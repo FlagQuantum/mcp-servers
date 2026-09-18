@@ -3073,36 +3073,41 @@ def test_a_literal_is_echoed_unchanged_in_every_position_it_can_occupy() -> None
     passed the literal string ``terms[``, it says ``terms[0] 'pauli' 'terms['
     covers 6 wires``. A blanket replace cannot tell those apart.
 
-    Measured across all three positions a literal can occupy — the pauli string,
-    the coefficient, and a term's key — after the three anchored patterns:
-    every one now keeps the caller's text intact.
+    **Each case carries the literal it sends and the form a blanket replace
+    would have produced, and the two halves are asserted per case.** An earlier
+    version of this test asserted a flat ``"'terms'" not in message`` for all
+    six cases. Measured, that reds against correct code in every one of them:
+    the caller's own quoted value *contains* the substring the assertion
+    forbids — ``'terms['`` contains ``'terms'``. A single ``not in`` pair cannot
+    express "the caller's text is intact and the SDK's noun is renamed" when the
+    two are the same word with quotes around it.
 
-    This test replaced one that asserted the *defect* here. Both bracket and
-    field-name forms are anchored now, so the defect is gone and the tripwire
-    fired, which is what it was for. The one surviving residual is the phrase
-    form, and it has its own test below.
+    This test replaced one that asserted the *defect* in the bracket position.
+    Both bracket and field-name forms are anchored now, so the defect is gone and
+    the tripwire fired, which is what it was for. The one surviving residual is
+    the phrase form, and it has its own test below.
     """
     from flagquantum_mcp_server.training import train_parameters
 
     cases = [
-        [{"pauli": "terms[", "coefficient": 1.0}],
-        [{"pauli": "ZZ", "coefficient": "terms["}],
-        [{"pauli": "ZZ", "coefficient": 1.0, "terms[": 1}],
-        [{"pauli": "terms", "coefficient": 1.0}],
-        [{"pauli": "ZZ", "coefficient": "terms"}],
-        [{"pauli": "ZZ", "coefficient": 1.0, "terms": 1}],
+        # (objective, the caller's literal, what a blanket replace would say)
+        ([{"pauli": "terms[", "coefficient": 1.0}], "terms[", "hamiltonian["),
+        ([{"pauli": "ZZ", "coefficient": "terms["}], "terms[", "hamiltonian["),
+        ([{"pauli": "ZZ", "coefficient": 1.0, "terms[": 1}], "terms[", "hamiltonian["),
+        ([{"pauli": "terms", "coefficient": 1.0}], "terms", "hamiltonian"),
+        ([{"pauli": "ZZ", "coefficient": "terms"}], "terms", "hamiltonian"),
+        ([{"pauli": "ZZ", "coefficient": 1.0, "terms": 1}], "terms", "hamiltonian"),
     ]
 
-    for objective in cases:
+    for objective, literal, rewritten in cases:
         with pytest.raises(ToolInputError) as caught:
             train_parameters(ANGLED, objective, "qir", steps=1)
         message = str(caught.value)
         assert "hamiltonian" in message, (objective, message)
-        # The SDK's nouns are renamed; the caller's are not.
-        assert "'terms'" not in message, (objective, message)
-        assert "('hamiltonian" not in message, (objective, message)
-        assert "['hamiltonian" not in message, (objective, message)
-        assert "terms['" not in message, (objective, message)
+        # The caller's own value is quoted back verbatim ...
+        assert f"'{literal}'" in message, (objective, message)
+        # ... in the same message whose SDK noun was renamed.
+        assert f"'{rewritten}'" not in message, (objective, message)
 
 
 def test_a_phrase_shaped_literal_is_the_one_recorded_residual() -> None:
@@ -3171,11 +3176,18 @@ def test_the_term_bound_still_reports_as_a_limit_and_not_as_invalid_input(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `../.venv/bin/pytest tests/test_training.py -q`
-Expected: PASS. This step adds fourteen tests; read the count off the output and
-check the def count rose by fourteen. One of them replaces a test that asserted
-the bracket defect, which this round fixes — so if you are following the brief's
-Step 1 verbatim and the file already has that test, remove it rather than adding
-beside it. Two `def`s of one name shadow, and the second silently never runs. (Three of the refusals it would otherwise add
+Expected: PASS. **The def count is unchanged at 49 and the collected count rises
+to 62.** This round deletes one test and adds two, but one of the two is
+parametrized over six cases, so the collected total moves by more than the def
+total does. Read both numbers off the run rather than assuming either:
+
+```bash
+../.venv/bin/pytest tests/test_training.py --collect-only -q | tail -1
+```
+
+An earlier draft of this step said "adds fourteen tests" from a before-count of
+60. The before-count was 61 — this plan's own round-3 step had added the residual
+test this round deletes — and neither figure was checked against the file. (Three of the refusals it would otherwise add
 are already in the file, shipped with Task 7 — see the note at the top of this
 task. One of the ten is parametrized, so the collected count rises by more than
 the def count; that is what Step 3 of Task 7 saw too.)
