@@ -94,6 +94,14 @@ to write by hand:
 [{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]
 ```
 
+**The two formats use different key names**, and this is the most common
+mistake: the gate list calls a gate `name` and its wires `index`, while serialized
+IR calls them `opcode` and `wires`. Sending IR keys as `qir` is rejected with a
+message that says so by name. An empty gate list is also rejected, because the
+wire count is inferred from the highest index — an empty list describes no
+circuit. A bare integer is accepted for a single-wire gate
+(`"index": 0` means `"index": [0]`).
+
 Either format can be passed to any tool; `serialize_circuit_tool` converts
 `qir` into canonical `ir`.
 

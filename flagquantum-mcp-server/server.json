@@ -3,7 +3,7 @@
   "name": "io.github.FlagQuantum/flagquantum-mcp-server",
   "title": "FlagQuantum MCP Server",
   "description": "Build, compile, serialize and plan FlagQuantum circuits locally. No credentials, no network, no hardware submission.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://github.com/FlagQuantum/mcp-servers",
   "repository": {
     "url": "https://github.com/FlagQuantum/mcp-servers",
@@ -14,7 +14,7 @@
     {
       "registryType": "pypi",
       "identifier": "flagquantum-mcp-server",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

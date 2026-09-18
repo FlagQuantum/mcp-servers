@@ -137,3 +137,69 @@ def test_gate_set_matches_the_sdk_alias_table() -> None:
     assert names == sorted(names)
     assert "run" not in names
     assert "analysis" not in names
+
+
+# Gate-list (qir) shape validation.
+#
+# The SDK reports every malformation of a gate list as "max() iterable argument
+# is empty", because it infers the wire count from the highest index. These
+# tests pin the messages a caller actually needs; the first case is the one a
+# model hits after reading the IR schema, since it reuses the IR key names.
+
+
+def test_gate_using_ir_key_names_is_named_as_such() -> None:
+    with pytest.raises(ToolInputError, match="uses the IR spelling 'opcode'"):
+        resolve_ir(json.dumps([{"opcode": "h", "wires": [0]}]), QIR_FORMAT)
+
+
+def test_gate_using_the_ir_wire_key_is_named_as_such() -> None:
+    with pytest.raises(ToolInputError, match="IR spelling 'wires'"):
+        resolve_ir(json.dumps([{"name": "h", "wires": [0]}]), QIR_FORMAT)
+
+
+def test_gate_without_an_index_is_rejected_by_position() -> None:
+    with pytest.raises(ToolInputError, match=r"Gate 1 \('cx'\) needs an 'index'"):
+        resolve_ir(json.dumps([{"name": "h", "index": [0]}, {"name": "cx"}]), QIR_FORMAT)
+
+
+def test_empty_gate_list_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="cannot be empty"):
+        resolve_ir("[]", QIR_FORMAT)
+
+
+def test_gate_that_is_not_an_object_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="must be a JSON object"):
+        resolve_ir(json.dumps(["h"]), QIR_FORMAT)
+
+
+def test_gate_without_a_name_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="non-empty string 'name'"):
+        resolve_ir(json.dumps([{"name": "", "index": [0]}]), QIR_FORMAT)
+
+
+def test_gate_with_an_empty_index_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="empty index"):
+        resolve_ir(json.dumps([{"name": "h", "index": []}]), QIR_FORMAT)
+
+
+def test_gate_with_a_non_integer_wire_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="non-integer wire"):
+        resolve_ir(json.dumps([{"name": "h", "index": ["0"]}]), QIR_FORMAT)
+
+
+def test_gate_with_a_negative_wire_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="negative wire -1"):
+        resolve_ir(json.dumps([{"name": "h", "index": [-1]}]), QIR_FORMAT)
+
+
+def test_gate_with_a_non_list_index_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="expected a list of wire numbers"):
+        resolve_ir(json.dumps([{"name": "h", "index": {"0": 1}}]), QIR_FORMAT)
+
+
+def test_a_bare_integer_index_is_accepted_as_a_one_wire_target() -> None:
+    """Writing "index": 0 is unambiguous, so it is accepted rather than refused."""
+    ir = resolve_ir(json.dumps([{"name": "h", "index": 0}]), QIR_FORMAT)
+
+    assert ir.n_wires == 1
+    assert ir.instructions[0].wires == (0,)

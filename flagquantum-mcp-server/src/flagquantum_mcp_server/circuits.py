@@ -113,18 +113,89 @@ def _ir_from_decoded(decoded: Any) -> Any:
 
 
 def _ir_from_qir(decoded: Any) -> Any:
-    """Build a CircuitIR from a decoded ``qir``-format gate list."""
+    """Build a CircuitIR from a decoded ``qir``-format gate list.
+
+    The gate shape is checked here rather than left to the SDK. The SDK infers
+    the wire count from the highest index and reports every malformation as
+    ``max() iterable argument is empty``, which tells a caller nothing — and the
+    most likely malformation is a caller reusing the key names from our own IR
+    schema (``opcode``/``wires`` instead of ``name``/``index``).
+    """
     if not isinstance(decoded, Sequence) or isinstance(decoded, (str, bytes)):
         raise ToolInputError(
             "circuit_format='qir' expects a JSON array of gate objects such as "
             '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]; '
             f"received {type(decoded).__name__}."
         )
+    if not decoded:
+        raise ToolInputError(
+            "A gate list cannot be empty: the wire count is inferred from the "
+            "highest index in the list, so an empty list describes no circuit."
+        )
+    gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
     sdk = load_sdk()
     try:
-        return sdk.Circuit.from_qir(list(decoded)).to_ir()
+        return sdk.Circuit.from_qir(gates).to_ir()
     except (ValueError, TypeError) as exc:
         raise ToolInputError(f"Gate list could not be built into a circuit: {exc}") from exc
+
+
+def _validate_gate(gate: Any, position: int) -> dict[str, Any]:
+    """Check one gate object and normalize its wire indices.
+
+    Args:
+        gate: The decoded gate object.
+        position: Zero-based position, used to name the offending entry.
+
+    Returns:
+        The gate with ``index`` normalized to a list of ints.
+
+    Raises:
+        ToolInputError: If the gate is not an object, is missing ``name`` or
+            ``index``, or carries indices that are not in-range integers.
+    """
+    prefix = f"Gate {position}"
+    if not isinstance(gate, Mapping):
+        raise ToolInputError(
+            f"{prefix} must be a JSON object with 'name' and 'index'; "
+            f"received {type(gate).__name__}."
+        )
+    if "name" not in gate and "opcode" in gate:
+        raise ToolInputError(
+            f"{prefix} uses the IR spelling 'opcode'. The qir format expects "
+            "'name' and 'index', not the IR keys "
+            f"({sorted(gate)}). Convert with circuit_format='ir', or rename the "
+            'keys: {"name": "h", "index": [0]}.'
+        )
+    name = gate.get("name")
+    if not isinstance(name, str) or not name:
+        raise ToolInputError(f"{prefix} needs a non-empty string 'name'; received {name!r}.")
+    if "index" not in gate and "wires" in gate:
+        raise ToolInputError(
+            f"{prefix} uses the IR spelling 'wires'. The qir format calls the same field 'index'."
+        )
+    index = gate.get("index")
+    if index is None:
+        raise ToolInputError(f"{prefix} ({name!r}) needs an 'index' naming its wires.")
+    if isinstance(index, int) and not isinstance(index, bool):
+        index = [index]
+    if not isinstance(index, (list, tuple)):
+        raise ToolInputError(
+            f"{prefix} ({name!r}) has index {index!r}; expected a list of wire "
+            "numbers such as [0] or [0, 1]."
+        )
+    wires: list[int] = []
+    for wire in index:
+        if isinstance(wire, bool) or not isinstance(wire, int):
+            raise ToolInputError(
+                f"{prefix} ({name!r}) has non-integer wire {wire!r}; wire numbers must be integers."
+            )
+        if wire < 0:
+            raise ToolInputError(f"{prefix} ({name!r}) has negative wire {wire}.")
+        wires.append(wire)
+    if not wires:
+        raise ToolInputError(f"{prefix} ({name!r}) has an empty index; name at least one wire.")
+    return {**gate, "index": wires}
 
 
 def enforce_limits(ir: Any) -> Any:
