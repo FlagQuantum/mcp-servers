@@ -3313,10 +3313,13 @@ And in the Conventions section, after the prompt-channel paragraph, add:
 - **A silent default is a wrong answer waiting.** `Module(hamiltonian=H)`
   accepts a Hamiltonian, stores it, exposes it as `.hamiltonian`, and evaluates
   `⟨Z₀⟩` instead — the observable is chosen by `RuntimePolicy.observable`, whose
-  default is `z`. Nothing warns. The training tool sets the policy explicitly
-  and a test asserts the Hamiltonian reaches the objective. When a public API
-  takes an argument it does not act on, assume the same shape elsewhere: find
-  the second object that decides, and set it.
+  default is `z`. Nothing warns. Measured: on a two-qubit circuit whose ⟨Z₀⟩
+  gradient vanishes at the initial state, the run does not merely converge on the
+  wrong quantity — it reports `status: "success"` with 200 completed steps and a
+  loss that never moved. The training tool sets the policy explicitly and a test
+  asserts the Hamiltonian reaches the objective. When a public API takes an
+  argument it does not act on, assume the same shape elsewhere: find the second
+  object that decides, and set it.
 ```
 
 - [ ] **Step 5: Check the documented commands still all resolve**
