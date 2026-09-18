@@ -1945,7 +1945,8 @@ Expected: PASS, and the new test appears twice, once per tuple.
 ```bash
 git add flagquantum-mcp-server/src/flagquantum_mcp_server/_bridge.py \
         flagquantum-mcp-server/src/flagquantum_mcp_server/training.py \
-        flagquantum-mcp-server/tests/test_training.py
+        flagquantum-mcp-server/tests/test_training.py \
+        flagquantum-mcp-server/tests/test_api_contract.py
 git commit -m "feat: build a training objective from the terms shape outputs already use"
 ```
 
@@ -3003,7 +3004,12 @@ def _trained(payload: dict[str, Any]) -> None:
     assert payload["initial_parameters"] == {"t0": 0.25, "t1": -0.25}, (
         "values must reach the optimizer"
     )
-    assert payload["final_loss"] < payload["initial_loss"], "learning_rate must reach the optimizer"
+    # A bound, not just "it went down". `final < initial` is true at every rate
+    # and every step count tried — measured, this circuit at default lr=0.1
+    # reaches -2.0539 after seven steps, and at lr=0.4 reaches -2.1289 — so
+    # "it went down" passes even when `learning_rate` never leaves the handler
+    # and the default is used. Both runs are deterministic to six decimals.
+    assert payload["final_loss"] < -2.10, "learning_rate must reach the optimizer"
 ```
 
 Add a case to `CASES`, using a two-qubit parameterized gate list and a two-term objective:

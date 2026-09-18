@@ -84,7 +84,7 @@ def load_module(module_path: str) -> ModuleType:
 
     A companion to :func:`load_attribute` for the case where several names come
     from one module: importing it once and reading the attributes is clearer than
-    three calls that each re-import it.
+    a call per name that each re-imports it.
 
     Args:
         module_path: Dotted path of the module to import.
