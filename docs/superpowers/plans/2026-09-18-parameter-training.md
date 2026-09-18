@@ -1524,7 +1524,8 @@ low-instruction region, and every code block that described it has been removed
 from this document rather than left where a reader could copy it. Read the
 function and its constants in `training.py` before changing either.
 
-What this step still owns is the shape, because it is what the tests below assert:
+What this step owns is the shape **as executed**, which is what the tests below
+assert:
 
 ```
 per_step = max(MIN_STEP_SECONDS,
@@ -1536,6 +1537,17 @@ Three terms. The floor is dispatch. The state term is the one the first model
 lacked: at 24 wires, holding the state costs 12.5 s per step even with a single
 gate, which is 7.5x what one instruction explains. The gate term is the marginal
 cost of applying gates against that state.
+
+**A fourth term was added after this task closed, and the block above is one term
+short of what ships.** This is the record of executed work, so it is left as
+executed; but a reader rebuilding from it would rebuild a defect. The whole-branch
+review measured the three-term model under-predicting 5.8x at four wires with two
+thousand five hundred instructions — below about twelve wires the floor governs
+and the instruction count never enters — which is the *same* failure as the
+low-instruction region this task fixed, one axis over. The shipped model adds
+`n_instructions * DISPATCH_COST`, and the calibration table in the design document
+gained four points on that axis. Read `predict_seconds` in `training.py`; the
+design document is where the model is specified.
 
 - [ ] **Step 4: Run the tests to verify they pass**
 
