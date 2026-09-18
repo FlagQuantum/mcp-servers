@@ -436,7 +436,7 @@ one, using the exact gradients a statevector simulation reports:
 {
   "circuit": "[{\"name\": \"ry\", \"index\": [0], \"parameters\": {\"theta\": {\"$parameter\": \"t0\"}}}]",
   "circuit_format": "qir",
-  "hamiltonian": [{"pauli": "ZZ", "coefficient": -1.0}, {"pauli": "XI", "coefficient": 1.0}],
+  "hamiltonian": [{"pauli": "Z", "coefficient": -1.0}, {"pauli": "X", "coefficient": 1.0}],
   "steps": 100,
   "learning_rate": 0.1
 }
@@ -448,16 +448,19 @@ it returned to continue the run rather than restart it.
 
 The `hamiltonian` argument is the same term list an `expectation` output takes,
 and it is required: without an objective the number being minimised is not an
-energy.
+energy. **One letter per wire** — the circuit above is one wire, so each term is
+one letter. A two-wire circuit takes `"ZZ"`, and a term whose length does not
+match the circuit is refused before anything runs.
 
 Two limits are worth knowing before you call it. Training is far more expensive
 than simulating — measured, a 16-qubit step costs 85 ms against a simulation's
 few milliseconds — so a run is refused up front when its predicted cost exceeds
 `FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS`, with the prediction, the width and the step
 count in the message. The cost that dominates at the top of the width range is
-holding the state: 25 s per step at 24 wires before a single gate is applied, so
-no 24-wire circuit gets more than two steps, and the layered ansatz measured here
-— 71 instructions, 119 s per step — gets none. That is a statement about the
+holding the state: the model predicts 25.2 s per step at 24 wires before a single
+gate is applied, so no 24-wire circuit gets more than two steps, and the layered
+ansatz measured here — 71 instructions — is predicted at 119 s per step and gets
+none. That is a statement about the
 circuit, not about the width: one gate at 24 wires is still under the budget.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run
@@ -467,7 +470,7 @@ does for a simulation.
 
 ## Which contracts this rests on
 
-FlagQuantum publishes a frozen `stable_exports` snapshot (34 names, each with a
+FlagQuantum publishes a frozen `stable_exports` snapshot (31 names, each with a
 named verification test), describes `flagquantum.compiler` as its "stable expert
 compiler interface", and lets each package declare its own `__all__`. This
 server uses all three tiers, and `tests/test_api_contract.py` pins the members

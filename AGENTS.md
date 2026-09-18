@@ -169,14 +169,40 @@ WHEELCHECK="$(mktemp -d)"
 python3 -m venv "$WHEELCHECK"
 "$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python3 -c "
-import sys, zipfile
-wheel = sys.argv[1]
-src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
-assert 'train_parameters_tool' in src, f'{wheel} predates this change'
+import pathlib, sys, zipfile
+
+wheel, source = pathlib.Path(sys.argv[1]), pathlib.Path("src/flagquantum_mcp_server")
+assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
+stale, absent, packaged = [], [], 0
+with zipfile.ZipFile(wheel) as z:
+    names = set(z.namelist())
+    for f in sorted(source.rglob("*.py")):
+        rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
+        if rel not in names:
+            absent.append(rel)
+        elif z.read(rel) != f.read_bytes():
+            stale.append(rel)
+        else:
+            packaged += 1
+assert packaged, f"no modules compared: {source} holds no .py files"
+assert not absent, f"{wheel} is missing {absent}"
+assert not stale, f"{wheel} was not built from this tree: {stale}"
+print(f"wheel matches the source tree ({packaged} modules)")
 " dist/*.whl
 "$WHEELCHECK/bin/python" -m pip install dist/*.whl
 "$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
 ```
+
+**Check the wheel is the one you just built, before you install it.** The version
+does not change between rehearsals, so a stale
+`flagquantum_mcp_server-0.2.0-py3-none-any.whl` and a fresh one are the same file
+path, and a build that failed or was skipped leaves the rehearsal green against
+the previous run's code. That block compares every packaged module to the source
+tree byte for byte, which names no feature and so cannot go stale when the next
+change lands. It also refuses to pass vacuously: run from the wrong directory,
+`rglob` finds nothing, every comparison is skipped, and "0 modules compared"
+reads as success — measured, which is why it asserts the source directory exists
+and that at least one module was compared before it looks at the wheel at all.
 
 **Every job in CI must be reproducible here, and the environment is part of the
 job.** The wheel smoke test failed on a release commit with `No module named

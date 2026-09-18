@@ -3415,8 +3415,11 @@ def train_parameters_tool(
             written {"theta": {"$parameter": "t0"}}. With circuit_format="ir"
             pass FlagQuantum IR JSON. OpenQASM is not accepted.
         hamiltonian: The objective, as a list of {"pauli": ..., "coefficient":
-            ...} objects, one letter per wire: [{"pauli": "ZZ", "coefficient":
-            1.0}, {"pauli": "XI", "coefficient": -0.5}]. Required.
+            ...} objects, one letter per wire: [{"pauli": "Z", "coefficient":
+            1.0}, {"pauli": "X", "coefficient": -0.5}]. The circuit example
+            above is one wire, so each term is one letter; a two-wire circuit
+            takes "ZZ". A term whose length does not match the circuit is
+            refused. Required.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         values: Starting value for each parameter, by name: {"t0": 0.1}. Every
             parameter needs one, and no others are accepted. Defaults to zeros.
@@ -3749,7 +3752,7 @@ one, using the exact gradients a statevector simulation reports:
 {
   "circuit": "[{\"name\": \"ry\", \"index\": [0], \"parameters\": {\"theta\": {\"$parameter\": \"t0\"}}}]",
   "circuit_format": "qir",
-  "hamiltonian": [{"pauli": "ZZ", "coefficient": -1.0}, {"pauli": "XI", "coefficient": 1.0}],
+  "hamiltonian": [{"pauli": "Z", "coefficient": -1.0}, {"pauli": "X", "coefficient": 1.0}],
   "steps": 100,
   "learning_rate": 0.1
 }
@@ -3761,16 +3764,19 @@ it returned to continue the run rather than restart it.
 
 The `hamiltonian` argument is the same term list an `expectation` output takes,
 and it is required: without an objective the number being minimised is not an
-energy.
+energy. **One letter per wire** — the circuit above is one wire, so each term is
+one letter. A two-wire circuit takes `"ZZ"`, and a term whose length does not
+match the circuit is refused before anything runs.
 
 Two limits are worth knowing before you call it. Training is far more expensive
 than simulating — measured, a 16-qubit step costs 85 ms against a simulation's
 few milliseconds — so a run is refused up front when its predicted cost exceeds
 `FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS`, with the prediction, the width and the step
 count in the message. The cost that dominates at the top of the width range is
-holding the state: 25 s per step at 24 wires before a single gate is applied, so
-no 24-wire circuit gets more than two steps, and the layered ansatz measured here
-— 71 instructions, 119 s per step — gets none. That is a statement about the
+holding the state: the model predicts 25.2 s per step at 24 wires before a single
+gate is applied, so no 24-wire circuit gets more than two steps, and the layered
+ansatz measured here — 71 instructions — is predicted at 119 s per step and gets
+none. That is a statement about the
 circuit, not about the width: one gate at 24 wires is still under the budget.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run

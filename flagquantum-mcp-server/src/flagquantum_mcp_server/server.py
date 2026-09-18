@@ -512,8 +512,11 @@ def train_parameters_tool(
             written {"theta": {"$parameter": "t0"}}. With circuit_format="ir"
             pass FlagQuantum IR JSON. OpenQASM is not accepted.
         hamiltonian: The objective, as a list of {"pauli": ..., "coefficient":
-            ...} objects, one letter per wire: [{"pauli": "ZZ", "coefficient":
-            1.0}, {"pauli": "XI", "coefficient": -0.5}]. Required.
+            ...} objects, one letter per wire: [{"pauli": "Z", "coefficient":
+            1.0}, {"pauli": "X", "coefficient": -0.5}]. The circuit example
+            above is one wire, so each term is one letter; a two-wire circuit
+            takes "ZZ". A term whose length does not match the circuit is
+            refused. Required.
         circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
         values: Starting value for each parameter, by name: {"t0": 0.1}. Every
             parameter needs one, and no others are accepted. Defaults to zeros.

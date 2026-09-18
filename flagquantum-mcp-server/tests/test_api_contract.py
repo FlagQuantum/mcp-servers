@@ -30,6 +30,11 @@ TIER1_FROZEN = (
     "Instruction",
     "IR_VERSION",
     "plan",
+    # Named by the training tool through a helper rather than at the call site,
+    # and in the README's tier-1 row, so it belongs here where a reader looks to
+    # ask which promise the SDK has made. The snapshot fixes the name only, which
+    # is why the tool's own test pins the default observable too.
+    "RuntimePolicy",
 )
 
 # Tier 2: public module with an explicit __all__, not in the frozen snapshot.
