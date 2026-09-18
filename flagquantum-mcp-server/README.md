@@ -460,8 +460,9 @@ count in the message. The cost that dominates at the top of the width range is
 holding the state: the model predicts 25.2 s per step at 24 wires before a single
 gate is applied, so no 24-wire circuit gets more than two steps, and the layered
 ansatz measured here — 71 instructions — is predicted at 119 s per step and gets
-none. That is a statement about the
-circuit, not about the width: one gate at 24 wires is still under the budget.
+none. That is a statement about the circuit, not the width: one gate at 24 wires
+is still under the budget, and the budget refuses by prediction rather than by
+width, so a narrow circuit with many layers is refused for the same reason.
 
 And the result is what it is: a loss curve and a set of angles. Whether the run
 converged is your reading, not this tool's claim, and the SDK's

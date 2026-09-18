@@ -30,10 +30,13 @@ TIER1_FROZEN = (
     "Instruction",
     "IR_VERSION",
     "plan",
-    # Named by the training tool through a helper rather than at the call site,
-    # and in the README's tier-1 row, so it belongs here where a reader looks to
-    # ask which promise the SDK has made. The snapshot fixes the name only, which
-    # is why the tool's own test pins the default observable too.
+    # Named at the call site in training.py, where the SDK's default would
+    # otherwise pick the observable and quietly train against <Z0> instead. It is
+    # in the README's tier-1 row, so it belongs in this tuple, where a reader
+    # looks to ask which promise the SDK has made -- and note the tuple is a
+    # weaker statement than it looks: the test below it is a hasattr, while the
+    # snapshot fixes the name only. That is why the training tool's own test
+    # pins the default observable too.
     "RuntimePolicy",
 )
 

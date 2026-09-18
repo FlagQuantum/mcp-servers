@@ -3590,27 +3590,40 @@ same-named 0.2.0 wheel from an earlier rehearsal while Task 9 was in flight.
 Assert on the contents instead of the name:
 
 ```bash
-python3 -c "
-import pathlib, sys, zipfile
+python3 - <<'PY'
+import glob, pathlib, sys, zipfile
 
-wheel, source = pathlib.Path(sys.argv[1]), pathlib.Path("src/flagquantum_mcp_server")
+wheels = sorted(glob.glob("dist/*.whl"))
+assert wheels, "no wheel in dist/: run `../.venv/bin/python -m build` first"
+assert len(wheels) == 1, f"more than one wheel in dist/: {wheels}"
+wheel = pathlib.Path(wheels[0])
+source = pathlib.Path("src/flagquantum_mcp_server")
 assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
-stale, absent, packaged = [], [], 0
+
 with zipfile.ZipFile(wheel) as z:
     names = set(z.namelist())
+    packaged, stale, absent = {}, [], []
     for f in sorted(source.rglob("*.py")):
         rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
         if rel not in names:
             absent.append(rel)
-        elif z.read(rel) != f.read_bytes():
-            stale.append(rel)
         else:
-            packaged += 1
+            packaged[rel] = z.read(rel)
+            if packaged[rel] != f.read_bytes():
+                stale.append(rel)
+
 assert packaged, f"no modules compared: {source} holds no .py files"
+extra = sorted(
+    n for n in names
+    if n.startswith("flagquantum_mcp_server/") and n.endswith(".py")
+    and n.removeprefix("flagquantum_mcp_server/") not in
+    {str(f.relative_to(source)) for f in source.rglob("*.py")}
+)
 assert not absent, f"{wheel} is missing {absent}"
 assert not stale, f"{wheel} was not built from this tree: {stale}"
-print(f"wheel matches the source tree ({packaged} modules)")
-" dist/*.whl
+assert not extra, f"{wheel} carries modules this tree does not have: {extra}"
+print(f"wheel matches the source tree ({len(packaged)} modules, both directions)")
+PY
 ```
 
 **Compare the packaged modules to the source, not to a phrase.** An earlier draft
@@ -3898,27 +3911,40 @@ temporary directory:
 WHEELCHECK="$(mktemp -d)"
 python3 -m venv "$WHEELCHECK"
 "$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-python3 -c "
-import pathlib, sys, zipfile
+python3 - <<'PY'
+import glob, pathlib, sys, zipfile
 
-wheel, source = pathlib.Path(sys.argv[1]), pathlib.Path("src/flagquantum_mcp_server")
+wheels = sorted(glob.glob("dist/*.whl"))
+assert wheels, "no wheel in dist/: run `../.venv/bin/python -m build` first"
+assert len(wheels) == 1, f"more than one wheel in dist/: {wheels}"
+wheel = pathlib.Path(wheels[0])
+source = pathlib.Path("src/flagquantum_mcp_server")
 assert source.is_dir(), f"run this from flagquantum-mcp-server/: {source} is not a directory"
-stale, absent, packaged = [], [], 0
+
 with zipfile.ZipFile(wheel) as z:
     names = set(z.namelist())
+    packaged, stale, absent = {}, [], []
     for f in sorted(source.rglob("*.py")):
         rel = "flagquantum_mcp_server/" + str(f.relative_to(source))
         if rel not in names:
             absent.append(rel)
-        elif z.read(rel) != f.read_bytes():
-            stale.append(rel)
         else:
-            packaged += 1
+            packaged[rel] = z.read(rel)
+            if packaged[rel] != f.read_bytes():
+                stale.append(rel)
+
 assert packaged, f"no modules compared: {source} holds no .py files"
+extra = sorted(
+    n for n in names
+    if n.startswith("flagquantum_mcp_server/") and n.endswith(".py")
+    and n.removeprefix("flagquantum_mcp_server/") not in
+    {str(f.relative_to(source)) for f in source.rglob("*.py")}
+)
 assert not absent, f"{wheel} is missing {absent}"
 assert not stale, f"{wheel} was not built from this tree: {stale}"
-print(f"wheel matches the source tree ({packaged} modules)")
-" dist/*.whl
+assert not extra, f"{wheel} carries modules this tree does not have: {extra}"
+print(f"wheel matches the source tree ({len(packaged)} modules, both directions)")
+PY
 "$WHEELCHECK/bin/python" -m pip install dist/*.whl
 "$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
 ```
