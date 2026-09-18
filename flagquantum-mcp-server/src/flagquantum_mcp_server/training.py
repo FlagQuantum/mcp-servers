@@ -226,14 +226,18 @@ def _in_this_tools_vocabulary(message: str) -> str:
     and after anchoring the caller's literal survives intact in every position it
     can occupy.
 
-    **One phrase is left unanchored, and it is the residual.** ``An expectation
-    needs`` sits mid-sentence with no fixed position to key on, so a caller whose
-    own value is the literal string ``An expectation needs a term`` still has it
-    echoed as ``An objective needs a term``. It is pinned by a test that asserts
-    the defective behaviour on purpose. The alternative — teaching the shared
-    validator to take its nouns as parameters — would change an interface that
-    the ``expectation`` output path also uses, to fix a message about an input no
-    caller will send. Recorded, not fixed, with the reasoning in the test.
+    **No residual remains, and the reason the last one was left is worth
+    keeping.** ``An expectation needs`` has no message prefix to anchor on — it
+    sits mid-sentence — so an earlier version of this function replaced it
+    outright, and a caller whose own value was those words had them rewritten.
+    The reasoning recorded at the time was that there was "no position to anchor
+    it to". **That was false, and in the same way the previous one was false:**
+    the phrase appears in exactly one SDK message, always immediately after
+    ``empty. ``, which is a position. Measured, anchoring on that context
+    rewrites the SDK's copy and leaves a caller's literal intact, with the
+    property test still green. The lesson is that "there is nothing to anchor on"
+    is a claim about the messages, and it needs the messages read rather than
+    recalled.
 
     The two phrases are named rather than replaced wholesale: a blanket
     ``expectation`` -> ``objective`` would also rewrite the message for an
@@ -252,7 +256,15 @@ def _in_this_tools_vocabulary(message: str) -> str:
         message = "hamiltonian" + message[len("terms") : close + 1] + message[close + 1 :]
     if message.startswith("This expectation carries"):
         message = "This objective carries" + message[len("This expectation carries") :]
-    return message.replace("An expectation needs", "An objective needs")
+    return message.replace(
+        # The SDK writes this phrase in exactly one message, always directly
+        # after "empty. ": "'terms' is empty. An expectation needs at least one
+        # term". A caller's copy of the same words arrives inside a quoted value
+        # — "is a string ('An expectation needs a term')" — so a context longer
+        # than the bare phrase tells the two apart where the phrase alone cannot.
+        "empty. An expectation needs",
+        "empty. An objective needs",
+    )
 
 
 def load_algorithms() -> Any:
