@@ -138,6 +138,54 @@ def test_a_parameter_inside_an_expression_is_substituted() -> None:
     )
 
 
+def test_a_gradient_flows_through_an_expression_to_the_name_inside_it() -> None:
+    """The expression path is optimized, not merely evaluated once.
+
+    A ``ParameterExpression`` resolves through the SDK's own ``bind``, so the
+    question a test has to answer is whether the tensor that comes back is
+    still attached to the graph ``Module`` optimizes. Measuring the gradient
+    against its analytic value answers it: for ``ry(1, t0)`` then
+    ``rz(1, 2*t1)`` against ``Y`` on wire 1, ``<Y> = sin(t0) sin(2 t1)``, so
+    ``d/dt1`` is ``2 sin(t0) cos(2 t1)``.
+
+    Without this, binding floats instead of tensors would leave every other
+    test green while a parameter inside an expression silently stopped
+    training — the failure this tool exists to prevent.
+    """
+    import math
+
+    import flagquantum as fq
+    from flagquantum.algorithms import Hamiltonian, pauli_term
+
+    qir = json.dumps(
+        [
+            {"name": "ry", "index": [1], "parameters": {"theta": {"$parameter": "t0"}}},
+            {
+                "name": "rz",
+                "index": [1],
+                "parameters": {
+                    "theta": {"$expression": {"op": "mul", "args": [2.0, {"$parameter": "t1"}]}}
+                },
+            },
+        ]
+    )
+    ir = _ir(qir)
+    module = fq.Module(
+        replay_builder(ir),
+        parameters=dict.fromkeys(parameter_names(ir), 1),
+        init={"t0": 0.8, "t1": 0.3},
+        hamiltonian=Hamiltonian([pauli_term(1.0, {1: "Y"})]),
+        policy=fq.RuntimePolicy(observable="hamiltonian"),
+    )
+
+    loss = module.execute().require_value().mean()
+    loss.backward()
+
+    groups = module.named_parameter_groups
+    assert float(loss.detach()) == pytest.approx(math.sin(0.8) * math.sin(0.6), abs=1e-6)
+    assert float(groups["t1"].grad) == pytest.approx(2 * math.sin(0.8) * math.cos(0.6), abs=1e-5)
+
+
 def test_a_matrix_gate_survives_the_replay() -> None:
     """A matrix is the one argument the replay must not drop or normalize."""
     import flagquantum as fq
