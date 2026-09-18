@@ -30,6 +30,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PACKAGE_ROOT = REPO_ROOT / "flagquantum-mcp-server"
 INSTRUCTIONS = REPO_ROOT / "AGENTS.md"
 
+# What a relative path this repository owes anyone looks like. The wheel block
+# names its interpreter through a shell variable (``"$WHEELCHECK/bin/python"``)
+# and names the packaged module inside a line of Python, and both contain a
+# slash without being paths a contributor could run from here. Anything a shell
+# would expand, quote or parse is not a token this check can resolve, so it is
+# not one the check may claim is missing.
+PATH_LIKE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
+
 pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
@@ -50,7 +58,11 @@ def _path_tokens() -> list[str]:
     """Return every relative path the blocks name, in order.
 
     Comments are stripped first: an example path inside a trailing comment is
-    prose, not something anyone is told to run.
+    prose, not something anyone is told to run. A token that is not shaped like
+    a relative path — quoted, or carrying a shell expansion, or a fragment of
+    the Python the block passes to ``-c`` — is not collected either, because
+    ``(PACKAGE_ROOT / token)`` cannot resolve it and reporting it as missing
+    would be a false alarm about a command that runs.
     """
     tokens: list[str] = []
     for block in _verification_blocks():
@@ -59,7 +71,7 @@ def _path_tokens() -> list[str]:
             for token in code.split():
                 if token.startswith("/") or "*" in token or "://" in token:
                     continue
-                if token.startswith("../") or "/" in token:
+                if "/" in token and PATH_LIKE.match(token):
                     tokens.append(token)
     return tokens
 

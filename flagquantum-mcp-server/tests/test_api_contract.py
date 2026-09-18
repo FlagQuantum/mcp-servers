@@ -140,6 +140,34 @@ def test_training_dependencies_are_still_declared_public(module_path: str, attri
     assert hasattr(module, attribute)
 
 
+def test_the_policy_that_makes_a_hamiltonian_reach_the_objective_still_exists() -> None:
+    """Without this object the SDK evaluates ⟨Z₀⟩ and ignores the Hamiltonian.
+
+    Pinned by name and by the one attribute that matters, because a rename here
+    would not fail anything else: the tool would keep training, keep converging
+    and keep reporting an energy it never measured.
+    """
+    assert hasattr(fq, "RuntimePolicy")
+    assert fq.RuntimePolicy().observable == "z"
+    assert fq.RuntimePolicy(observable="hamiltonian").observable == "hamiltonian"
+
+
+def test_the_module_members_the_training_tool_reads_still_exist() -> None:
+    """The three class-level members. The fourth is pinned elsewhere, on purpose.
+
+    ``named_parameter_groups`` is deliberately absent from this tuple. It is
+    assigned in ``Module.__init__`` — ``self.named_parameter_groups:
+    ParameterDict | None = None`` — so it does not exist on the class, and
+    ``hasattr(fq.Module, "named_parameter_groups")`` is **False**. Measured, and
+    a test that asserted it would fail on the very SDK it is meant to pin, which
+    is the failure mode this file exists to prevent. It is covered instead by the
+    training tests, which read it off a real module the tool built, at the one
+    place ``training.py`` needs a named group.
+    """
+    for attribute in ("execute", "parameters", "named_parameters"):
+        assert hasattr(fq.Module, attribute), f"Module.{attribute} disappeared"
+
+
 def test_analysis_object_still_carries_the_fields_we_report() -> None:
     analysis = fq.Circuit(2).h(0).cx(0, 1).analysis()
 

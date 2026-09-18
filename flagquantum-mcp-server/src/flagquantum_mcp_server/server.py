@@ -500,7 +500,9 @@ def train_parameters_tool(
 
     Adam at the learning rate you set. Losses are reported one per step, so a
     caller can see whether the run is still moving; whether it has converged is
-    your reading, not this tool's claim.
+    your reading, not this tool's claim. The parameters it ended on come back as
+    "parameters"; pass those back as "values" to continue a run rather than
+    restart it.
 
     Args:
         circuit: Circuit payload carrying parameters. With circuit_format="qir"

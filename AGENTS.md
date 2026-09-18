@@ -66,6 +66,14 @@ has configured a Qiskit MCP server already knows how to configure ours.
    direct in-process resources are *Compute*/*Simulation*, and credentials and
    submission belong to *Remote*, which this server does not touch.
 
+   `train_parameters_tool` is inside the same line. The gradients it uses are
+   the SDK's exact gradients for a statevector simulation, computed in this
+   process from a circuit the caller supplied — no target, no token, no
+   hardware. What it adds is a way to *lower* an energy rather than read one,
+   which is why it carries the same provenance block and the same
+   `accuracy.metric == "not_measured"` as a simulation: a converged loss curve
+   is not evidence about any machine either.
+
 5. **Tools are read-only over the caller's inputs and side-effect free.** No
    tool may mutate files, environment variables, or global state.
 
@@ -113,6 +121,16 @@ has configured a Qiskit MCP server already knows how to configure ours.
   `PROMPT_CONSTRAINTS` in `tests/test_server_contract.py` holds that mapping,
   and a new prompt rule fails the build until it is either placed where an
   agent will read it or recorded there with a tool that carries it.
+- **A silent default is a wrong answer waiting.** `Module(hamiltonian=H)`
+  accepts a Hamiltonian, stores it, exposes it as `.hamiltonian`, and evaluates
+  `⟨Z₀⟩` instead — the observable is chosen by `RuntimePolicy.observable`, whose
+  default is `z`. Nothing warns. Measured: on a two-qubit circuit whose ⟨Z₀⟩
+  gradient vanishes at the initial state, the run does not merely converge on the
+  wrong quantity — it reports `status: "success"` with 200 completed steps and a
+  loss that never moved. The training tool sets the policy explicitly and a test
+  asserts the Hamiltonian reaches the objective. When a public API takes an
+  argument it does not act on, assume the same shape elsewhere: find the second
+  object that decides, and set it.
 
 ## Verification
 
@@ -147,10 +165,17 @@ cd flagquantum-mcp-server
 # the wheel and no development dependencies, which is the only one that proves
 # the built artifact works.
 ../.venv/bin/python -m build
-python3 -m venv /tmp/wheelcheck
-/tmp/wheelcheck/bin/python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-/tmp/wheelcheck/bin/python -m pip install dist/*.whl
-/tmp/wheelcheck/bin/python -c "import pytest"            # must FAIL: see below
+WHEELCHECK="$(mktemp -d)"
+python3 -m venv "$WHEELCHECK"
+"$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python3 -c "
+import sys, zipfile
+wheel = sys.argv[1]
+src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
+assert 'train_parameters_tool' in src, f'{wheel} predates this change'
+" dist/*.whl
+"$WHEELCHECK/bin/python" -m pip install dist/*.whl
+"$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
 ```
 
 **Every job in CI must be reproducible here, and the environment is part of the

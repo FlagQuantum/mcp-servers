@@ -17,8 +17,8 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Sixteen tools over stdio. Fifteen of them only read the circuit they are given;
-the sixteenth runs it locally.
+Seventeen tools over stdio. Fifteen of them only read the circuit they are
+given; the other two run it, one to measure it and one to improve it.
 
 **Build and inspect**
 
@@ -60,6 +60,7 @@ the sixteenth runs it locally.
 | Tool | What it answers |
 | --- | --- |
 | `simulate_circuit_tool` | Counts, samples, marginal probabilities or an expectation value from a local statevector run |
+| `train_parameters_tool` | The angles that lower a circuit's energy against a Pauli-sum Hamiltonian |
 
 Three resources: `flagquantum://version` (versions of the server, the SDK and
 the IR contract), `flagquantum://gate-set` (every gate with its wire count and
@@ -309,6 +310,7 @@ them without a code change:
 | `FLAGQUANTUM_MCP_MAX_IR_BYTES` | 262144 | Serialized circuit payload |
 | `FLAGQUANTUM_MCP_MAX_QASM_CHARS` | 1000000 | Emitted program size |
 | `FLAGQUANTUM_MCP_MAX_COMPARE_TOPOLOGIES` | 4 | Topologies per comparison |
+| `FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` | 60 | Predicted cost of one training call |
 | `FLAGQUANTUM_MCP_MAX_RESPONSE_VALUES` | 65536 | Values one result may carry back |
 | `FLAGQUANTUM_MCP_MAX_HAMILTONIAN_TERMS` | 1024 | Pauli terms per expectation request |
 
@@ -425,6 +427,44 @@ evaluate — bind the circuit's gates first instead. A single unweighted term is
 still spelled `"pauli": "ZZ"`, and the two spellings are one code path, so they
 cannot drift apart.
 
+### Lowering an energy
+
+`simulate_circuit_tool` evaluates an energy. `train_parameters_tool` improves
+one, using the exact gradients a statevector simulation reports:
+
+```json
+{
+  "circuit": "[{\"name\": \"ry\", \"index\": [0], \"parameters\": {\"theta\": {\"$parameter\": \"t0\"}}}]",
+  "circuit_format": "qir",
+  "hamiltonian": [{"pauli": "ZZ", "coefficient": -1.0}, {"pauli": "XI", "coefficient": 1.0}],
+  "steps": 100,
+  "learning_rate": 0.1
+}
+```
+
+It returns the loss after each step, the parameters it ended on, and the
+parameters it started from. Call it again with `values` set to the `parameters`
+it returned to continue the run rather than restart it.
+
+The `hamiltonian` argument is the same term list an `expectation` output takes,
+and it is required: without an objective the number being minimised is not an
+energy.
+
+Two limits are worth knowing before you call it. Training is far more expensive
+than simulating — measured, a 16-qubit step costs 85 ms against a simulation's
+few milliseconds — so a run is refused up front when its predicted cost exceeds
+`FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS`, with the prediction, the width and the step
+count in the message. The cost that dominates at the top of the width range is
+holding the state: 25 s per step at 24 wires before a single gate is applied, so
+no 24-wire circuit gets more than two steps, and the layered ansatz measured here
+— 71 instructions, 119 s per step — gets none. That is a statement about the
+circuit, not about the width: one gate at 24 wires is still under the budget.
+
+And the result is what it is: a loss curve and a set of angles. Whether the run
+converged is your reading, not this tool's claim, and the SDK's
+`accuracy.metric == "not_measured"` travels with the execution exactly as it
+does for a simulation.
+
 ## Which contracts this rests on
 
 FlagQuantum publishes a frozen `stable_exports` snapshot (34 names, each with a
@@ -435,9 +475,9 @@ of each:
 
 | Tier | Surface | Used by |
 | --- | --- | --- |
-| 1. Frozen snapshot | `Circuit`, `CircuitIR`, `Instruction`, `IR_VERSION`, `ExecutionOptions`, `ExecutionPlan`, `plan`, `Parameter`, … | analyze, serialize, deserialize, plan, inspect/bind parameters |
+| 1. Frozen snapshot | `Circuit`, `CircuitIR`, `Instruction`, `IR_VERSION`, `ExecutionOptions`, `ExecutionPlan`, `plan`, `Parameter`, `RuntimePolicy`, … | analyze, serialize, deserialize, plan, inspect/bind parameters, train_parameters |
 | 2. Documented module | `flagquantum.compiler`: `CouplingMap`, `optimize`, `route_to_topology`, `schedule_layers` | optimize, route, compare, describe layers |
-| 3. Public but not frozen | `flagquantum.compiler.openqasm.emit_openqasm`, `flagquantum.compiler.qcis.emit_qcis`, `flagquantum.drawer.draw`, `flagquantum.core.{operator_manifest,gate_info,canonical_opcode}` | emit_openqasm, emit_qcis, draw, gate validation |
+| 3. Public but not frozen | `flagquantum.compiler.openqasm.emit_openqasm`, `flagquantum.compiler.qcis.emit_qcis`, `flagquantum.drawer.draw`, `flagquantum.core.{operator_manifest,gate_info,canonical_opcode}`, `flagquantum.algorithms.{Hamiltonian, pauli_term}` | emit_openqasm, emit_qcis, draw, gate validation, train_parameters |
 
 **Tier 3 is the weakest, and it is not decoration.** Gate validation needs each
 gate's wire count and parameter names, and the SDK's operator manifest is the
@@ -448,6 +488,15 @@ rather than an `AttributeError` inside a tool call, and every tier-3 name is
 pinned by a test so a move upstream fails the build instead of failing a user.
 The failures that guard against are quiet ones: a weaker gate check accepts a
 misspelled parameter and drops it.
+
+The training tool is the one place where the tiers are not the whole story. Its
+objective needs two names that are **not** frozen — `Hamiltonian` and
+`pauli_term`, both from `flagquantum.algorithms` — and one that is:
+`RuntimePolicy` is in the frozen snapshot, but the snapshot fixes only the name.
+Whether the Hamiltonian reaches the run is decided by
+`RuntimePolicy().observable`, whose default is `"z"`, so
+`tests/test_api_contract.py` pins that default too rather than trusting the
+snapshot to carry it.
 
 The dependency is pinned to `flagquantum>=0.2,<0.3`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that

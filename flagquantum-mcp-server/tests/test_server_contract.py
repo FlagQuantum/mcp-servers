@@ -271,6 +271,7 @@ async def test_the_ir_schema_resource_shows_how_to_write_a_symbol() -> None:
         ("emit_openqasm_tool", "measures every wire"),
         ("simulate_circuit_tool", "not_measured"),
         ("simulate_circuit_tool", "executes in this"),
+        ("train_parameters_tool", "continue a run"),
     ],
 )
 async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, phrase: str) -> None:
