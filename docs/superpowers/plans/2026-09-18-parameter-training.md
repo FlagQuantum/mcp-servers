@@ -3409,10 +3409,11 @@ def train_parameters_tool(
 
     Args:
         circuit: Circuit payload carrying parameters. With circuit_format="qir"
-            pass a gate list such as '[{"name": "ry", "index": [0],
-            "parameters": {"theta": {"$parameter": "t0"}}}]'. With
-            circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not
-            accepted.
+            pass a gate list such as '[{"name": "h", "index": [0]}, {"name":
+            "ry", "index": [0], "parameters": {"theta": {"$parameter": "t0"}}}]'.
+            A gate carries its arguments under "parameters", so a symbol is
+            written {"theta": {"$parameter": "t0"}}. With circuit_format="ir"
+            pass FlagQuantum IR JSON. OpenQASM is not accepted.
         hamiltonian: The objective, as a list of {"pauli": ..., "coefficient":
             ...} objects, one letter per wire: [{"pauli": "ZZ", "coefficient":
             1.0}, {"pauli": "XI", "coefficient": -0.5}]. Required.
@@ -3463,7 +3464,7 @@ def _trained(payload: dict[str, Any]) -> None:
     assert payload["final_loss"] < -2.10, "learning_rate must reach the optimizer"
 ```
 
-Add a case to `CASES`, using a two-qubit parameterized gate list and a two-term objective:
+Add a case to `CASES`, using a two-qubit parameterized gate list and a three-term objective:
 
 ```python
     "train_parameters_tool": [
@@ -3620,7 +3621,18 @@ def test_the_policy_that_makes_a_hamiltonian_reach_the_objective_still_exists() 
 
 
 def test_the_module_members_the_training_tool_reads_still_exist() -> None:
-    for attribute in ("named_parameter_groups", "execute", "parameters", "named_parameters"):
+    """The three class-level members. The fourth is pinned elsewhere, on purpose.
+
+    ``named_parameter_groups`` is deliberately absent from this tuple. It is
+    assigned in ``Module.__init__`` — ``self.named_parameter_groups:
+    ParameterDict | None = None`` — so it does not exist on the class, and
+    ``hasattr(fq.Module, "named_parameter_groups")`` is **False**. Measured, and
+    a test that asserted it would fail on the very SDK it is meant to pin, which
+    is the failure mode this file exists to prevent. It is covered instead by the
+    training tests, which read it off a real module the tool built, at the one
+    place ``training.py`` needs a named group.
+    """
+    for attribute in ("execute", "parameters", "named_parameters"):
         assert hasattr(fq.Module, attribute), f"Module.{attribute} disappeared"
 ```
 
