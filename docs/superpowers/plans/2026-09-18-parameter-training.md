@@ -2032,7 +2032,12 @@ def test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before() 
 
     assert resumed["initial_loss"] == pytest.approx(first["final_loss"], abs=1e-6)
     assert resumed["initial_parameters"] == pytest.approx(first["parameters"])
-    assert resumed["initial_loss"] < resumed["final_loss"]
+    # The guard that keeps the assertion above from passing vacuously: if the
+    # optimizer did nothing, initial and final would be the same number and the
+    # equality would hold no matter what `final_loss` were computed from. This
+    # is NOT the continuation claim — the equality above is — so it asserts only
+    # that the resumed run improved.
+    assert resumed["final_loss"] < resumed["initial_loss"]
 
 
 def test_the_reported_parameters_are_what_the_next_call_starts_from() -> None:
@@ -2381,7 +2386,7 @@ def _resolve_values(names: tuple[str, ...], values: Mapping[str, float] | None) 
         ToolInputError: If a name is unknown, missing, or not a real number.
     """
     if values is None:
-        return {name: 0.0 for name in names}
+        return dict.fromkeys(names, 0.0)
     if not isinstance(values, Mapping):
         raise ToolInputError(
             f"values must be an object mapping parameter names to numbers; "
@@ -2554,7 +2559,7 @@ after = before.replace(
 assert after != before, "the first replace did not apply"
 moved = after.replace(
     "    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))",
-    "    _check_budget(ir, steps)\n    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))",
+    "    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))\n    _check_budget(ir, steps)",
 )
 assert moved != after, "the second replace did not apply"
 after = moved
@@ -2564,6 +2569,15 @@ PY
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
 find . -name __pycache__ -type d -exec rm -rf {} +
 ```
+
+**The budget check must be re-inserted *below* the objective line, not above
+it.** An earlier draft of this step put it immediately *above* — which keeps
+`_check_budget` running before `hamiltonian_from_terms`, so the all-identity
+objective is still never built, the `ToolLimitError` still fires, and the test
+stays **green**. Measured: the above-version gives `2 passed`, the below-version
+gives `1 failed, 1 passed` with `ToolInputError: terms[0] 'IIII…' is entirely
+identity`. A mutation that leaves the property it means to break intact is worse
+than no mutation, because its green reads as "the ordering is unpinned".
 
 **This mutation is two replacements, so it gets two guards.** A single
 `assert after != before` after a chain proves only that *one* of them applied.
