@@ -105,6 +105,63 @@ each other.
 Publishing, and changing a package's visibility, are outward-facing actions.
 Do not do either without explicit authorization.
 
+### When to release
+
+**A release is a discovery event, not a way to ship a commit.** Publish when
+someone outside this repository would benefit from installing the result:
+
+- a new tool, or a new argument on an existing tool
+- a change that alters what a tool returns
+- a fix that changes behaviour a caller could have depended on
+- a packaging or dependency-range change
+
+Do **not** publish for a documentation-only change, a test-only change, a CI
+change, or a comment. Accumulate those on `main`; they ship with the next
+release that has a reason to exist.
+
+This is not only about tidiness. Every published filename is permanent, and the
+release list is the first thing a visitor sees — five versions in one day reads
+as thrashing regardless of how good each change was. Bumping the version in the
+same commit as the change is the habit that produces it; the version is bumped
+once, at release time, across the three places `tests/test_versions.py` checks.
+
+There is nothing to clean up retroactively: PyPI will not let a filename be
+reused after deletion, and yanking a version that nothing depends on changes
+only how it renders. The only lever is the next release.
+
+### Shipping `main` without a release
+
+Anyone who wants the current `main` — a reviewer, a teammate, someone testing
+an unreleased fix — installs from git:
+
+```bash
+# as a dependency
+pip install "git+https://github.com/FlagQuantum/mcp-servers.git#subdirectory=flagquantum-mcp-server"
+
+# as an MCP server, no install at all
+claude mcp add flagquantum -- uvx --from "git+https://github.com/FlagQuantum/mcp-servers.git#subdirectory=flagquantum-mcp-server" flagquantum-mcp-server
+```
+
+`uvx` resolves that to a commit and reports it —
+`flagquantum-mcp-server @ git+https://...#subdirectory=...@e9197fb` — which is
+the useful identifier for a git install, and the one to quote in a bug report.
+
+**A git install and a PyPI release share a version string but are not the same
+artifact.** A checkout of `main` reports whatever version was last released
+while carrying commits that release does not have. The version number is a
+release label, not a build identity; the commit hash is the build identity. If
+you need to know which you have, `pip show` gives the version, and the install
+log gives the commit.
+
+### What forces a release
+
+The MCP Registry entry points at a PyPI version and the registry verifies that
+version exists — `publish-mcp-registry.yml` polls PyPI before it publishes. So
+a release is also what makes the server *discoverable*; a git-only change is
+usable by someone who already knows about it and invisible to everyone else.
+That is the trade: release rarely, and accept that until you do, only people
+who were told about the change can have it.
+
 ## Publishing a second server
 
 Three places enumerate the packages, and a new one must be added to all of

@@ -37,6 +37,23 @@ the full tool list and the limits each tool enforces, and
 [`flagquantum-mcp-server/examples/`](flagquantum-mcp-server/examples/) for a
 runnable end-to-end script.
 
+### Running `main` instead of the latest release
+
+Releases are batched deliberately, so `main` is regularly ahead of PyPI. To run
+the current `main` — a fix that has not been released yet, or a change under
+review — point the client at the repository instead of the package:
+
+```bash
+claude mcp add flagquantum -- uvx --from "git+https://github.com/FlagQuantum/mcp-servers.git#subdirectory=flagquantum-mcp-server" flagquantum-mcp-server
+```
+
+`uvx` reports the commit it built, such as
+`flagquantum-mcp-server @ git+https://...#subdirectory=...@e9197fb`. Quote that
+commit in a bug report rather than a version number: a checkout of `main`
+reports the last released version while carrying commits that release does not
+have, so the version alone does not identify what you ran. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the release policy.
+
 ## Layout
 
 ```

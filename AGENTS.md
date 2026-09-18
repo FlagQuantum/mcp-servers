@@ -67,6 +67,17 @@ has configured a Qiskit MCP server already knows how to configure ours.
    not add a tool to reach a capability that is still `experimental` or
    `development_evidence` in FlagQuantum's `capability-maturity.toml`.
 
+8. **A PyPI release is a discovery event, not a way to ship a commit.** Do not
+   release for a documentation-only, test-only or CI-only change, and do not
+   bump the version in the same breath as making a change. Accumulate work on
+   `main` and release when someone outside this repository would benefit from
+   installing it: a new tool, a change that alters a tool's results, a contract
+   change, a packaging fix. Anyone who wants `main` in the meantime installs
+   from git — see CONTRIBUTING.md. Every published filename is permanent and
+   public, so the release list is part of what this project looks like; a
+   version per commit makes it look abandoned-and-thrashing at the same time.
+   Never release without explicit authorization.
+
 ## Conventions
 
 - Every server is a standalone PyPI package under its own top-level directory,
@@ -95,3 +106,10 @@ cd flagquantum-mcp-server
 Report the actual output. A scaffold that has never been executed is not
 finished, and this repository's README must not describe a capability that no
 test exercises.
+
+**A new test earns its place only if it fails when the code is wrong.** Break
+the thing it claims to check and watch it go red before trusting it. A test
+written against an implementation that is already correct will pass whether or
+not it asserts anything — this repository has shipped exactly that mistake once,
+with twenty-two cases that all passed while checking nothing, and only a
+deliberate mutation revealed it.
