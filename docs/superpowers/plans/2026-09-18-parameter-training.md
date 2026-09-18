@@ -3577,6 +3577,28 @@ deletes nothing.
 
 Expected: the tool list includes `train_parameters_tool`, and the `import pytest` line fails — that is the check that the artifact does not depend on the test framework, which is the one the 0.2.0 release got wrong.
 
+**Check the wheel is the one you just built, before you install it.** The version
+does not change between rehearsals — measured, this tree builds
+`flagquantum_mcp_server-0.2.0-py3-none-any.whl` and `python -m build` overwrites
+whatever held that name — so a stale wheel is indistinguishable from a fresh one
+by filename, and a build that failed or was skipped leaves the rehearsal passing
+against the previous run's code. Measured on this machine: `dist/` held a
+same-named 0.2.0 wheel from an earlier rehearsal while Task 9 was in flight.
+Assert on the contents instead of the name:
+
+```bash
+"$WHEELCHECK/bin/python" -c "
+import sys, zipfile
+wheel = sys.argv[1]
+src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
+assert 'train_parameters_tool' in src, f'{wheel} is stale: it predates this change'
+print('wheel is fresh')
+" dist/*.whl
+```
+
+An `assert` on the built artifact, not on the source tree you already ran the
+suite against — the point of the rehearsal is that the *packaged* thing works.
+
 - [ ] **Step 9: Commit**
 
 ```bash
@@ -3785,9 +3807,20 @@ temporary directory:
 WHEELCHECK="$(mktemp -d)"
 python3 -m venv "$WHEELCHECK"
 "$WHEELCHECK/bin/python" -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+python3 -c "
+import sys, zipfile
+wheel = sys.argv[1]
+src = zipfile.ZipFile(wheel).read('flagquantum_mcp_server/server.py').decode()
+assert 'train_parameters_tool' in src, f'{wheel} predates this change'
+" dist/*.whl
 "$WHEELCHECK/bin/python" -m pip install dist/*.whl
 "$WHEELCHECK/bin/python" -c "import pytest"            # must FAIL: see below
 ```
+
+The version is static, so the wheel's *name* cannot tell you whether the build
+ran: a stale `flagquantum_mcp_server-0.2.0-py3-none-any.whl` and a fresh one are
+the same file path, and a build that failed leaves the rehearsal green against
+the previous run's code. Assert on the packaged `server.py` instead.
 
 - [ ] **Step 5: Check the documented commands still all resolve**
 
