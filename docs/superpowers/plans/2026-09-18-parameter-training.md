@@ -3616,6 +3616,8 @@ Two jobs that are cheap together and expensive apart: a tier-3 dependency nothin
 
 **Files:**
 - Modify: `flagquantum-mcp-server/tests/test_api_contract.py`
+- Modify: `flagquantum-mcp-server/tests/test_server_contract.py`
+- Modify: `flagquantum-mcp-server/src/flagquantum_mcp_server/server.py`
 - Modify: `flagquantum-mcp-server/README.md`
 - Modify: `AGENTS.md`
 
@@ -3762,7 +3764,51 @@ And in the tier table's third row, extending the existing list:
 | 3. Public but not frozen | …, `flagquantum.algorithms.{Hamiltonian, pauli_term}`, `flagquantum.RuntimePolicy` | train_parameters |
 ```
 
-- [ ] **Step 4: Update `AGENTS.md`**
+- [ ] **Step 4: Publish the one fact the training tool hides under `Returns:`**
+
+`test_server_contract.py` opens a section with these words: "FastMCP publishes
+only the docstring summary; `Args:` becomes the parameter descriptions and
+`Returns:` is dropped entirely. So a fact written under `Returns:` is invisible
+to every client." The test below them is a curated list of facts that used to
+live in the wrong place, and the training tool is not on it.
+
+Measured, the training tool has one such fact. Its **continuation instruction** —
+that the `parameters` it returns can be passed back as `values` — appears only
+under `Returns:`:
+
+```
+'continue a run' published? False
+'Feed "parameters" back' published? False
+```
+
+Fixing it takes both halves, and the order matters: the phrase has to be
+published *before* it is asserted, or the new entry fails on the tool it is meant
+to pin.
+
+First, move the load-bearing clause into the summary. In `server.py`, in the
+tool's final prose paragraph:
+
+```python
+    Adam at the learning rate you set. Losses are reported one per step, so a
+    caller can see whether the run is still moving; whether it has converged is
+    your reading, not this tool's claim. The parameters it ended on come back as
+    "parameters"; pass those back as "values" to continue a run rather than
+    restart it.
+```
+
+Then add the entry to the list in `test_server_contract.py`:
+
+```python
+        ("train_parameters_tool", "continue a run"),
+```
+
+Run: `../.venv/bin/pytest tests/test_server_contract.py -q`
+
+Expected: PASS. The `Returns:` section keeps its enumeration — the keys a caller
+learns by calling the tool once — and only the instruction that cannot be
+discovered moves up.
+
+- [ ] **Step 5: Update `AGENTS.md`**
 
 Three edits to `AGENTS.md`.
 
@@ -3822,12 +3868,12 @@ ran: a stale `flagquantum_mcp_server-0.2.0-py3-none-any.whl` and a fresh one are
 the same file path, and a build that failed leaves the rehearsal green against
 the previous run's code. Assert on the packaged `server.py` instead.
 
-- [ ] **Step 5: Check the documented commands still all resolve**
+- [ ] **Step 6: Check the documented commands still all resolve**
 
 Run: `../.venv/bin/pytest tests/test_documented_commands.py -q`
 Expected: PASS. This test parses the bash blocks under `## Verification` in `AGENTS.md` and asserts every relative path resolves, so an edit that adds an unrunnable command fails here.
 
-- [ ] **Step 6: Run every gate**
+- [ ] **Step 7: Run every gate**
 
 ```bash
 ../.venv/bin/ruff check .
@@ -3839,7 +3885,7 @@ Expected: PASS. This test parses the bash blocks under `## Verification` in `AGE
 
 Expected: all pass.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add flagquantum-mcp-server/tests/test_api_contract.py \
