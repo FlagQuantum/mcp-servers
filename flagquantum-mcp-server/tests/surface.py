@@ -38,6 +38,7 @@ EXPECTED_TOOLS = frozenset(
         "describe_layers_tool",
         "describe_topology_tool",
         "draw_circuit_tool",
+        "train_parameters_tool",
     }
 )
 

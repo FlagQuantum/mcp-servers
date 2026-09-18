@@ -45,6 +45,7 @@ from flagquantum_mcp_server.parameters import bind_parameters, inspect_parameter
 from flagquantum_mcp_server.planning import plan_execution
 from flagquantum_mcp_server.simulation import simulate_execution
 from flagquantum_mcp_server.structure import describe_layers, describe_topology
+from flagquantum_mcp_server.training import train_parameters
 
 INSTRUCTIONS = """\
 FlagQuantum is a quantum AI framework whose circuits are built, compiled and
@@ -460,6 +461,76 @@ def simulate_circuit_tool(
         contract that records a local run as not measured.
     """
     return simulate_execution(circuit, circuit_format, options=options, outputs=outputs)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def train_parameters_tool(
+    circuit: str,
+    hamiltonian: Sequence[Mapping[str, Any]],
+    circuit_format: CircuitFormat = "ir",
+    values: Mapping[str, float] | None = None,
+    steps: int = 50,
+    learning_rate: float = 0.1,
+) -> dict[str, Any]:
+    """Optimize a parameterized circuit's angles against a Pauli-sum energy.
+
+    This is the gradient step that simulate_circuit_tool cannot take. That tool
+    evaluates an energy; this one improves it. Fifty calls to simulate, each one
+    a guess, is a manual scan; one call here is a descent, because the SDK
+    reports exact gradients for a statevector simulation and this tool uses
+    them.
+
+    The objective is the Hamiltonian expectation, and it has to be given: the
+    "hamiltonian" argument takes the same term list an "expectation" output
+    takes, one letter per wire. There is no default, because without an
+    objective the number being minimised is not an energy.
+
+    Runs in this process: a statevector simulation on CPU, no network, no
+    credentials, no provider. The result carries the SDK's provenance and its
+    accuracy contract, which reports metric "not_measured" — an ideal
+    simulation is not evidence about hardware.
+
+    Refused before starting: a circuit with no parameters, a missing or
+    malformed objective, a starting value that names a parameter the circuit
+    does not have or omits one it does, a step count or learning rate the
+    optimizer cannot use, a circuit carrying "observables" (never read — put the
+    objective in "hamiltonian"), and any run whose predicted cost is past the
+    budget. The prediction is an estimate, not a measurement of your machine.
+
+    Adam at the learning rate you set. Losses are reported one per step, so a
+    caller can see whether the run is still moving; whether it has converged is
+    your reading, not this tool's claim.
+
+    Args:
+        circuit: Circuit payload carrying parameters. With circuit_format="qir"
+            pass a gate list such as '[{"name": "h", "index": [0]}, {"name":
+            "ry", "index": [0], "parameters": {"theta": {"$parameter": "t0"}}}]'.
+            A gate carries its arguments under "parameters", so a symbol is
+            written {"theta": {"$parameter": "t0"}}. With circuit_format="ir"
+            pass FlagQuantum IR JSON. OpenQASM is not accepted.
+        hamiltonian: The objective, as a list of {"pauli": ..., "coefficient":
+            ...} objects, one letter per wire: [{"pauli": "ZZ", "coefficient":
+            1.0}, {"pauli": "XI", "coefficient": -0.5}]. Required.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+        values: Starting value for each parameter, by name: {"t0": 0.1}. Every
+            parameter needs one, and no others are accepted. Defaults to zeros.
+        steps: Number of optimizer updates. Default 50.
+        learning_rate: Adam's learning rate. Default 0.1.
+
+    Returns:
+        The loss trajectory, the parameters the run ended on, the parameters it
+        started from, the circuit identity and the execution provenance. Feed
+        "parameters" back as "values" to continue a run rather than restart it.
+    """
+    return train_parameters(
+        circuit,
+        hamiltonian,
+        circuit_format,
+        values=values,
+        steps=steps,
+        learning_rate=learning_rate,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)

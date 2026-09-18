@@ -51,6 +51,13 @@ GHZ4 = json.dumps(
 SYMBOLIC = json.dumps(
     [{"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "theta"}}}]
 )
+TRAINABLE = json.dumps(
+    [
+        {"name": "ry", "index": [0], "parameters": {"theta": {"$parameter": "t0"}}},
+        {"name": "ry", "index": [1], "parameters": {"theta": {"$parameter": "t1"}}},
+        {"name": "cx", "index": [0, 1]},
+    ]
+)
 
 # Built through the module rather than the tool: this is the input to a case,
 # not the thing under test.
@@ -180,6 +187,20 @@ def _drawn_with_initial_state(payload: dict[str, Any]) -> None:
     assert payload["n_lines"] == 2, "show_all_wires must keep the idle wire"
 
 
+def _trained(payload: dict[str, Any]) -> None:
+    assert payload["completed_steps"] == 7, "steps must reach the loop"
+    assert payload["circuit"]["n_qubits"] == 2
+    assert payload["initial_parameters"] == {"t0": 0.25, "t1": -0.25}, (
+        "values must reach the optimizer"
+    )
+    # A bound, not just "it went down". `final < initial` is true at every rate
+    # and every step count tried — measured, this circuit at default lr=0.1
+    # reaches -2.0539 after seven steps, and at lr=0.4 reaches -2.1289 — so
+    # "it went down" passes even when `learning_rate` never leaves the handler
+    # and the default is used. Both runs are deterministic to six decimals.
+    assert payload["final_loss"] < -2.10, "learning_rate must reach the optimizer"
+
+
 # tool name -> [(arguments, what the non-default arguments must have done)]
 CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
     "analyze_circuit_tool": [({"circuit": GHZ, "circuit_format": "qir"}, _analyzed)],
@@ -296,6 +317,23 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
                 "show_initial_state": True,
             },
             _drawn_with_initial_state,
+        )
+    ],
+    "train_parameters_tool": [
+        (
+            {
+                "circuit": TRAINABLE,
+                "hamiltonian": [
+                    {"pauli": "ZZ", "coefficient": -1.0},
+                    {"pauli": "XI", "coefficient": 1.0},
+                    {"pauli": "IX", "coefficient": 1.0},
+                ],
+                "circuit_format": "qir",
+                "values": {"t0": 0.25, "t1": -0.25},
+                "steps": 7,
+                "learning_rate": 0.4,
+            },
+            _trained,
         )
     ],
 }
