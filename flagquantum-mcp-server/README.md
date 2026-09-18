@@ -35,8 +35,7 @@ Three prompts: `build_and_analyze_circuit`, `compile_for_topology`,
 pip install flagquantum-mcp-server
 ```
 
-This pulls `flagquantum`, which depends on `torch`. Nothing in this server
-imports torch directly; it comes with the SDK.
+This pulls `flagquantum`, which depends on `torch`.
 
 ### Claude Code
 
