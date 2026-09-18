@@ -1,0 +1,41 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.FlagQuantum/flagquantum-mcp-server",
+  "title": "FlagQuantum MCP Server",
+  "description": "Build, compile, serialize and plan FlagQuantum circuits locally. No credentials, no network, no hardware submission.",
+  "version": "0.1.0",
+  "websiteUrl": "https://github.com/FlagQuantum/mcp-servers",
+  "repository": {
+    "url": "https://github.com/FlagQuantum/mcp-servers",
+    "source": "github",
+    "subfolder": "flagquantum-mcp-server"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "flagquantum-mcp-server",
+      "version": "0.1.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "FLAGQUANTUM_MCP_MAX_QUBITS",
+          "description": "Largest circuit width the server will process. Defaults to 24.",
+          "isRequired": false
+        },
+        {
+          "name": "FLAGQUANTUM_MCP_MAX_GATES",
+          "description": "Largest instruction count the server will process. Defaults to 10000.",
+          "isRequired": false
+        },
+        {
+          "name": "FLAGQUANTUM_MCP_MAX_IR_BYTES",
+          "description": "Largest serialized circuit payload accepted, in bytes. Defaults to 262144.",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

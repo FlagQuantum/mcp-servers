@@ -1,0 +1,80 @@
+name: Publish to PyPI
+
+# Manual dispatch only. The reference suite triggers these jobs from version
+# tags, but that turns every tag push into an irreversible public release.
+# Enable a tag trigger once PyPI trusted publishing is configured for this
+# repository and a release has been rehearsed; until then a human starts this
+# workflow on purpose.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which package to publish
+        required: true
+        type: choice
+        options:
+          - flagquantum-mcp-server
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        working-directory: ${{ inputs.package }}
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Check the manifest matches the package version
+        working-directory: ${{ inputs.package }}
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, sys
+
+          root = pathlib.Path(".")
+          pyproject = (root / "pyproject.toml").read_text(encoding="utf-8")
+          declared = re.search(r'^version = "([^"]+)"', pyproject, re.MULTILINE).group(1)
+          manifest = json.loads((root / "server.json").read_text(encoding="utf-8"))
+
+          if manifest["version"] != declared:
+              sys.exit(
+                  f"server.json version {manifest['version']} != "
+                  f"pyproject version {declared}"
+              )
+          if manifest["packages"][0]["version"] != declared:
+              sys.exit("server.json package entry version does not match")
+          print(f"version {declared} consistent")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ inputs.package }}
+          path: ${{ inputs.package }}/dist/
+
+  publish:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    # Configure this environment in the repository settings and register it as
+    # a trusted publisher on PyPI before enabling the workflow. Without it the
+    # job fails rather than publishing from a token.
+    environment: pypi
+    permissions:
+      id-token: write # OIDC token for PyPI trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist-${{ inputs.package }}
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # Nothing is published until the trusted publisher exists on PyPI.
+          attestations: true

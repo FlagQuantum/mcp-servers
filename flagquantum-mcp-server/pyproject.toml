@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "flagquantum-mcp-server"
+version = "0.1.0"
+description = "MCP server giving any MCP-compatible agent local access to the FlagQuantum SDK"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "FlagQuantum Team", email = "flagquantum@gmail.com" },
+]
+keywords = ["mcp", "quantum", "flagquantum", "agent", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "flagquantum>=0.2,<0.3",
+    "fastmcp>=3.2.0,<4",
+]
+
+[project.urls]
+Homepage = "https://github.com/FlagQuantum/mcp-servers"
+Repository = "https://github.com/FlagQuantum/mcp-servers"
+Issues = "https://github.com/FlagQuantum/mcp-servers/issues"
+
+[project.scripts]
+flagquantum-mcp-server = "flagquantum_mcp_server:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=4.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "build>=1.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flagquantum_mcp_server"]
+
+[tool.ruff]
+extend = "../ruff.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not integration' --strict-markers"
+asyncio_mode = "auto"
+markers = [
+    "unit: pure-logic tests with no subprocess or network",
+    "integration: tests that exercise the server process end to end",
+]
+
+[tool.coverage.run]
+source = ["src/flagquantum_mcp_server"]

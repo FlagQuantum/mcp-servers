@@ -1,0 +1,55 @@
+# Shared ruff configuration for every MCP server package in this repository.
+# Each server's pyproject.toml extends this file so that lint rules stay uniform.
+
+line-length = 100
+target-version = "py310"
+
+[lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "RUF",  # Ruff-specific rules
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "PTH",  # flake8-use-pathlib
+    "PL",   # Pylint
+    "PERF", # Perflint
+]
+ignore = [
+    # E501 is enforced by the formatter, not by the linter.
+    "E501",
+    # PLC0415: local imports are intentional for the lazy `flagquantum` import
+    # path. See `flagquantum_mcp_server/_bridge.py`.
+    "PLC0415",
+    # TC003: FastMCP calls `get_type_hints` on every registered tool to build
+    # its JSON schema (fastmcp/tools/function_tool.py). Annotations naming
+    # `Callable`, `Mapping`, `Sequence` or `ModuleType` must therefore resolve
+    # at runtime; moving those imports into a TYPE_CHECKING block turns tool
+    # registration into a NameError. The imports are stdlib and cost nothing.
+    "TC003",
+]
+
+[lint.pylint]
+# MCP tool signatures are flat by design: nesting routing knobs into an options
+# object would hide from the agent exactly the parameters it needs to see, and
+# a routing call legitimately has eight independent settings.
+max-args = 9
+max-positional-args = 9
+
+[lint.per-file-ignores]
+# Tests are allowed to use assert, long fixtures and private helpers.
+"**/tests/**" = ["S101", "PLR2004", "SLF001"]
+# Examples are human-facing teaching code: prints are intended output.
+"**/examples/**" = ["T201"]
+
+[lint.pydocstyle]
+convention = "google"
+
+[lint.isort]
+known-first-party = ["flagquantum_mcp_server"]

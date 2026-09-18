@@ -1,0 +1,63 @@
+"""Bound every input this server accepts.
+
+Defaults are sized so that a single tool call cannot make the server allocate
+unbounded memory or keep an agent waiting. Each limit is overridable through
+an environment variable so a deployment can tighten or relax it without a code
+change; malformed or non-positive values fall back to the default rather than
+disabling the bound.
+"""
+
+from __future__ import annotations
+
+import os
+
+DEFAULT_MAX_QUBITS = 24
+DEFAULT_MAX_GATES = 10_000
+DEFAULT_MAX_IR_BYTES = 262_144
+DEFAULT_MAX_QASM_CHARS = 1_000_000
+DEFAULT_MAX_COMPARE_TOPOLOGIES = 4
+
+
+def _positive_int(name: str, default: int) -> int:
+    """Read a positive integer from the environment, falling back on default.
+
+    Args:
+        name: Environment variable name.
+        default: Value to use when the variable is unset or unusable.
+
+    Returns:
+        The resolved positive integer.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def max_qubits() -> int:
+    """Return the largest circuit width this server will process."""
+    return _positive_int("FLAGQUANTUM_MCP_MAX_QUBITS", DEFAULT_MAX_QUBITS)
+
+
+def max_gates() -> int:
+    """Return the largest instruction count this server will process."""
+    return _positive_int("FLAGQUANTUM_MCP_MAX_GATES", DEFAULT_MAX_GATES)
+
+
+def max_ir_bytes() -> int:
+    """Return the largest serialized circuit payload this server will accept."""
+    return _positive_int("FLAGQUANTUM_MCP_MAX_IR_BYTES", DEFAULT_MAX_IR_BYTES)
+
+
+def max_qasm_chars() -> int:
+    """Return the largest emitted program this server will return."""
+    return _positive_int("FLAGQUANTUM_MCP_MAX_QASM_CHARS", DEFAULT_MAX_QASM_CHARS)
+
+
+def max_compare_topologies() -> int:
+    """Return how many topologies one comparison call may evaluate."""
+    return _positive_int("FLAGQUANTUM_MCP_MAX_COMPARE_TOPOLOGIES", DEFAULT_MAX_COMPARE_TOPOLOGIES)
