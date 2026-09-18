@@ -125,8 +125,12 @@ def gate_records(names: list[str] | None = None) -> dict[str, Any]:
         "gates": [_shape(record) for record in records],
         "note": (
             "Pass these names in a qir gate list as {'name': ..., 'index': [...]}, "
-            "with one index per wire and one entry per parameter. "
-            "'parameters' lists the accepted keyword names."
+            "with one index per wire. A gate's arguments go under the key "
+            "'parameters', as in "
+            '{"name": "rz", "index": [0], "parameters": {"theta": 0.5}}. The '
+            "'parameters' field of each record lists the keyword names that gate "
+            "accepts, in order. An angle is in radians, and a value may be a "
+            "number or a symbol written {'$parameter': '<name>'}."
         ),
     }
 

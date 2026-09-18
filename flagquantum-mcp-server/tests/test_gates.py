@@ -79,6 +79,21 @@ def test_gate_records_rejects_an_unknown_name_with_suggestions() -> None:
         gate_records(["rzzz"])
 
 
+def test_the_note_names_the_key_a_gate_keeps_its_arguments_under() -> None:
+    """The gate table knows the argument *names*; the note has to place them.
+
+    It used to say "one entry per parameter" without naming the enclosing key,
+    so a caller who had only this tool to go on had to try "params" first — the
+    spelling the IR format uses — and be corrected by an error message.
+    """
+    note = gate_records(["rz"])["note"]
+
+    assert "'parameters'" in note
+    assert '"parameters": {"theta": 0.5}' in note
+    assert "radians" in note
+    assert "$parameter" in note
+
+
 def test_closest_names_ranks_by_shared_prefix() -> None:
     """The best match comes first; ties between equally close names are free.
 
