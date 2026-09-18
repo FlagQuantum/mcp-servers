@@ -132,7 +132,11 @@ jobs:
           proc.wait(timeout=30)
 
           assert info["name"] == "FlagQuantum", info
-          assert len(tools) == 9, [tool["name"] for tool in tools]
+          # The count is asserted a second time by the unit suite, against the
+          # server object rather than a subprocess. Keeping both is deliberate:
+          # this one proves the *built wheel* serves the same surface, and it is
+          # the check that caught this number going stale after a release.
+          assert len(tools) == 15, [tool["name"] for tool in tools]
           assert proc.returncode == 0, proc.stderr.read()
           print(f"handshake ok: {info}, {len(tools)} tools")
           PY
