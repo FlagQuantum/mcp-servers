@@ -2549,16 +2549,34 @@ Path(str(p) + ".mutbak").write_text(before)
 after = before.replace(
     "    _check_budget(ir, steps)\n\n    names = parameter_names(ir)",
     "\n    names = parameter_names(ir)",
-).replace(
+)
+assert after != before, "the first replace did not apply"
+moved = after.replace(
     "    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))",
     "    _check_budget(ir, steps)\n    objective = hamiltonian_from_terms(hamiltonian, n_wires=int(ir.n_wires))",
 )
-assert after != before, "mutation did not apply"
+assert moved != after, "the second replace did not apply"
+after = moved
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k budget -q
 python3 -c "import pathlib; pathlib.Path('src/flagquantum_mcp_server/training.py.mutbak').replace(pathlib.Path('src/flagquantum_mcp_server/training.py'))"
+find . -name __pycache__ -type d -exec rm -rf {} +
 ```
+
+**This mutation is two replacements, so it gets two guards.** A single
+`assert after != before` after a chain proves only that *one* of them applied.
+Each half-applied state is a different experiment from the one you mean to run,
+and both look like a result:
+
+- first replaced, second not — `_check_budget` is gone entirely, so the test
+  goes red because no limit error is raised at all, which is not the ordering
+  claim.
+- second replaced, first not — there are now two `_check_budget` calls, the
+  early one still runs first, and the test goes **green**. An implementer who saw
+  that would conclude the ordering is unpinned and rewrite the test to match.
+
+Guard each replacement against the text it consumed, not against the original.
 
 Expected: FAIL on `test_a_run_past_the_budget_is_refused_before_any_work_starts`.
 That test hands in an all-identity objective, which the shared validator
