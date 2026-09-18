@@ -114,6 +114,14 @@ cd flagquantum-mcp-server
 ../../.venv/bin/pytest -m "not integration"
 ```
 
+Run **these commands**, not equivalents. `pytest` as a console script inserts
+only the test file's own directory into `sys.path`; `python -m pytest` inserts
+the working directory as well, so it resolves imports that CI cannot and turns a
+collection error into a green run. That difference put two red commits on `main`
+and reached a release bump before anyone saw it: 512 tests passed locally under
+the invocation CI does not use. If a check has two spellings, the one written
+here is the one that counts.
+
 Report the actual output. A scaffold that has never been executed is not
 finished, and this repository's README must not describe a capability that no
 test exercises.
