@@ -1,0 +1,101 @@
+name: Publish to MCP Registry
+
+# Manual dispatch only, for the same reason as the PyPI workflow: a registry
+# listing is public and a tag-triggered release publishes without a human
+# deciding to. Both workflows are meant to be run together, PyPI first —
+# the registry stores metadata only, and verifies that the package version it
+# points at actually exists. This workflow waits for it.
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which package to publish
+        required: true
+        type: choice
+        options:
+          - flagquantum-mcp-server
+
+jobs:
+  publish:
+    name: Publish to the MCP Registry
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # GitHub OIDC: proves we own the io.github.FlagQuantum namespace
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Wait for the version to reach PyPI
+        # The registry rejects a manifest whose package version does not exist
+        # yet, so this polls rather than racing the PyPI workflow.
+        working-directory: ${{ inputs.package }}
+        run: |
+          python - <<'PY'
+          import json, pathlib, time, urllib.error, urllib.request
+
+          manifest = json.loads(pathlib.Path("server.json").read_text(encoding="utf-8"))
+          name = manifest["packages"][0]["identifier"]
+          version = manifest["packages"][0]["version"]
+          url = f"https://pypi.org/pypi/{name}/{version}/json"
+
+          deadline = time.monotonic() + 600
+          while True:
+              try:
+                  with urllib.request.urlopen(url, timeout=30) as response:
+                      if response.status == 200:
+                          print(f"{name} {version} is on PyPI")
+                          break
+              except urllib.error.HTTPError as exc:
+                  if exc.code != 404:
+                      raise
+              except OSError as exc:
+                  print(f"transient error, retrying: {exc}")
+              if time.monotonic() > deadline:
+                  raise SystemExit(f"timed out waiting for {name} {version} on PyPI")
+              time.sleep(15)
+          PY
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" \
+            | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+          mcp-publisher --help
+
+      - name: Validate the manifest before publishing it
+        # Catches registry-only constraints (such as the 100-character
+        # description limit) while the run is still cheap to redo.
+        working-directory: ${{ inputs.package }}
+        run: mcp-publisher validate
+
+      - name: Authenticate with GitHub OIDC
+        # No secret: the registry accepts this OIDC token as proof that the
+        # workflow runs in the repository that owns the io.github.FlagQuantum
+        # namespace named in server.json.
+        run: mcp-publisher login github-oidc
+
+      - name: Publish
+        working-directory: ${{ inputs.package }}
+        run: mcp-publisher publish
+
+      - name: Confirm the listing resolves
+        working-directory: ${{ inputs.package }}
+        run: |
+          python - <<'PY'
+          import json, pathlib, urllib.request
+
+          name = json.loads(pathlib.Path("server.json").read_text(encoding="utf-8"))["name"]
+          url = f"https://registry.modelcontextprotocol.io/v0.1/servers?search={name}"
+          with urllib.request.urlopen(url, timeout=30) as response:
+              payload = json.load(response)
+
+          servers = payload.get("servers", [])
+          versions = [
+              entry["server"]["version"]
+              for entry in servers
+              if entry["server"]["name"] == name
+          ]
+          if not versions:
+              raise SystemExit(f"{name} is not listed in the registry")
+          print(f"registry lists {name} at {sorted(versions)}")
+          PY

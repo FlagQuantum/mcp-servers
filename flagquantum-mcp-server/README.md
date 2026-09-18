@@ -1,11 +1,19 @@
 # FlagQuantum MCP Server
 
+[![MCP Registry](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fregistry.modelcontextprotocol.io%2Fv0.1%2Fservers%2Fio.github.FlagQuantum%252Fflagquantum-mcp-server%2Fversions%2Flatest&query=%24.server.version&label=MCP%20Registry&logo=modelcontextprotocol)](https://registry.modelcontextprotocol.io/?q=io.github.FlagQuantum%2Fflagquantum-mcp-server)
+
+<!-- mcp-name: io.github.FlagQuantum/flagquantum-mcp-server -->
+
 An [MCP](https://modelcontextprotocol.io) server that gives any MCP-compatible
 agent local access to the [FlagQuantum](https://github.com/flagos-ai/FlagQuantum)
 SDK: build, compile, route, serialize and plan quantum circuits, with no
 credentials, no network access and no hardware submission.
 
 Part of [`FlagQuantum/mcp-servers`](https://github.com/FlagQuantum/mcp-servers).
+
+The `mcp-name` comment above is not decoration: the MCP Registry reads it from
+this README to verify that whoever publishes the registry entry also controls
+the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 

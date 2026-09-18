@@ -71,3 +71,34 @@ def test_the_dependency_is_a_version_range_not_a_url() -> None:
     assert "flagquantum>=0.2,<0.3" in declared
     assert "git+" not in declared
     assert "http" not in declared
+
+
+def test_readme_carries_the_registry_ownership_marker() -> None:
+    """The MCP Registry reads this line to prove we control the PyPI package.
+
+    PyPI has no "verified publisher" field, so the registry verifies ownership
+    by looking for ``mcp-name: <server-name>`` in the published README. Remove
+    it and registry publishing fails at the ownership check, not at validation
+    — which is why it is pinned here rather than left to a comment.
+    """
+    readme = (PACKAGE_ROOT / "README.md").read_text(encoding="utf-8")
+    name = _server_json()["name"]
+
+    assert f"mcp-name: {name}" in readme
+
+
+def test_registry_description_fits_the_registry_limit() -> None:
+    """The registry rejects a description longer than 100 characters.
+
+    This is a registry constraint, not a packaging one; a longer description
+    passes every local check and fails only when publishing.
+    """
+    description = str(_server_json()["description"])
+
+    assert 0 < len(description) <= 100, len(description)
+
+
+def test_registry_manifest_declares_only_supported_transports() -> None:
+    """The registry understands stdio and streamable-http, not sse."""
+    for entry in _server_json()["packages"]:
+        assert entry["transport"]["type"] in {"stdio", "streamable-http"}
