@@ -16,6 +16,12 @@ opinion about the same fact.
 The remedies differ by tool — a simulation points at ``outputs``, a training run
 at ``hamiltonian`` — so the caller supplies the sentence that says what to do
 instead. The fact is shared; the advice is not.
+
+The module also carries the two things that are shared but are not refusals:
+``plain``, the conversion from SDK containers to JSON-native values, and
+``SDK_FAILURE_BASES``, the exception bases an execution call can raise. Keeping
+them beside the refusals is deliberate — a caller reaching for one should find
+the others, and all three exist because more than one tool needs them.
 """
 
 from __future__ import annotations
@@ -28,8 +34,8 @@ from flagquantum_mcp_server.errors import ToolInputError
 
 # The exception bases reachable from a FlagQuantum execution call:
 # ValidationError is a ValueError, ExecutionError a RuntimeError, CapabilityError
-# a NotImplementedError. A tool wraps its one SDK call in these and nothing else,
-# so what arrives is the SDK describing the request.
+# a NotImplementedError. This tool's one SDK call is wrapped in these and nothing
+# else, so what arrives is the SDK describing the request.
 SDK_FAILURE_BASES: tuple[type[BaseException], ...] = (
     ValueError,
     RuntimeError,
@@ -92,8 +98,8 @@ def reject_circuit_observables(ir: Any, *, remedy: str) -> None:
 
     Args:
         ir: The validated ``CircuitIR``.
-        remedy: What this caller should do instead. The sentence after the
-            count, ending in a period.
+        remedy: What this caller should do instead, as one or more sentences.
+            Appended after the shared explanation.
 
     Raises:
         ToolInputError: If the circuit carries any observable.
@@ -103,9 +109,9 @@ def reject_circuit_observables(ir: Any, *, remedy: str) -> None:
         return
     raise ToolInputError(
         f"This circuit's 'observables' field carries {len(observables)} "
-        "entr(ies), and it is not read: the default statevector path never "
-        "evaluates the field, so the result would carry no expectation value "
-        f"and no error either. {remedy}"
+        "entr(ies), and nothing this server runs evaluates it: the field is "
+        "dropped without a word rather than refused, so a result would carry "
+        f"neither the value it names nor an error. {remedy}"
     )
 
 
