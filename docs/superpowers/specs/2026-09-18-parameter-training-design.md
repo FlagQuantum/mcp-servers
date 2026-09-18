@@ -128,7 +128,7 @@ count, which for the four-layer rows is `12n - 4`.
 | 22 | 1 | 65 | 8.6 s | 14 min |
 | 24 | 1 | 71 | 68 s | 1.9 h |
 
-Two costs, and both are visible in that table. At small widths the per-step
+Three costs, and all three are visible in that table. At small widths the per-step
 cost is nearly flat and dominated by dispatch. Past 12 qubits the state the SDK
 carries takes over and grows as `2 ** n_wires`. Gate count matters too, in both
 regimes: at 16 qubits, four layers cost 147 ms/step against one layer's 85 ms.
@@ -233,19 +233,44 @@ A prediction decides before any work starts, because the alternative is a
 stdio session that hangs for an hour with the client blocked.
 
 ```
-startup         ≈ 0.5                                      seconds, once
-per_step        ≈ max(0.02, n_instructions × 2 ** n_wires × 1e-7)
+startup         ≈ 0.5                                          seconds, once
+per_step        ≈ max(0.02,
+                      2 ** n_wires × 1.5e-6,                  holding the state
+                      n_instructions × 2 ** n_wires × 1e-7)   applying gates
 predicted_total ≈ startup + steps × per_step
 ```
 
-Two terms, because cost has two regimes, and each term is the cost it models
-rather than a fitted fudge. `startup` is the `make_fx` trace, paid once per
-process. `per_step` is work per step: gates applied against a state of
-`2 ** n_wires` amplitudes, so it is the product of the two. The `0.02` floor is
-dispatch, measured at 1.8 ms at 4 qubits and 9 ms at 12, rounded up. The `1e-7`
-is the only calibrated number.
+Three terms, because cost has three regimes, and each term is a cost that was
+measured rather than a fitted fudge. `startup` is the `make_fx` trace, paid once
+per process. The other two are paid on every step and are separate terms because
+they were measured to be separate: **holding** a state of `2 ** n_wires`
+amplitudes costs `1.5e-6` per amplitude, and **applying** gates against it costs
+`1e-7` per amplitude per instruction. The `0.02` floor is dispatch, measured at
+1.8 ms at 4 qubits and 9 ms at 12, rounded up.
 
-Checked against every measurement in the table above, plus the cold first call:
+The state term is the one this model first got wrong, and how it got it wrong is
+worth recording, because the same mistake is available to anyone re-deriving the
+model from this section. The version before this one had only the floor and the
+gate term. Every row of the table below over-predicted, so it looked sound — but
+every row was one of two kinds, and neither kind could see the missing cost.
+Where the width was small (4, 8, 12) the floor swamped both terms, so the row
+said nothing about either. Where the width was large (16 and up) the circuit
+carried 47 instructions or more, so the gate term dominated and the row said
+nothing about the state. No row was large-width *and* few-instruction, which is
+exactly where the two-term model broke: at 24 wires with a single gate, one step
+costs 12.5 s, 7.5× what one instruction explains, with the other 87% being the
+cost of holding the state at all. The model admitted that call for 35 steps at a
+predicted 59.2 s, and it took 438 s. **A calibration table that omits an axis
+cannot constrain the model along it.** The shipped test's table is sixteen
+points rather than ten, and the six it gained — `(16, 3)`, `(20, 1)`, `(20, 3)`,
+`(22, 1)`, `(24, 1)`, `(24, 4)` — are the ones the state term is calibrated
+against.
+
+Checked against every measurement in the table above, plus the cold first call.
+Every row is unchanged from the two-term model's predictions, which is the point
+worth noticing: this table could not tell the two models apart either, because
+no row of it is large-width *and* few-instruction. It is kept as the check that
+neither model under-predicts the circuits this design measured.
 
 | width | layers | steps | predicted | measured | over by |
 | --- | --- | --- | --- | --- | --- |
@@ -264,7 +289,7 @@ Every row over-predicts, which is the direction that matters: a refusal that
 sometimes declines work that would have fitted is a better failure than a call
 that blocks for an hour. The margins run from 1.7× to 25×, and the shape of that
 spread is honest — the model is a straight line through a curve, it is closest
-at the top where the state cost dominates and the constant was calibrated, and
+at the top where the state cost dominates and the constants were calibrated, and
 farthest at the bottom where the floor it uses (20 ms) is ten times the dispatch
 it actually measured (1.8 ms). A tighter floor would fit the small widths better
 and buy nothing: at a 60 s budget the floor is what lets a 4-qubit caller ask for
@@ -276,9 +301,10 @@ per-state cost is not constant across the whole range — it falls from 1.0e-5 p
 instruction-state at 4 qubits to 2.1e-8 at 20, then rises again to 5.7e-8 at 24
 as the state (134 MB of `complex64`) stops fitting where it used to. A single
 coefficient cannot follow that, so `1e-7` is chosen to clear the highest point
-rather than the average one, and it over-predicts 3–5× through the middle to do
-it. An earlier draft of this model used `3e-8`, which was calibrated at 20
-qubits and under-predicted 24 by 2.4×.
+rather than the average one: over the thirteen calibration points the floor does
+not govern, it over-predicts between 1.9× and 8.4×. An earlier draft of this
+model used `3e-8`, which was calibrated at 20 qubits and under-predicted 24 by
+2.4×.
 
 A still earlier draft had only a `2 ** n_wires` term and a `0.02` floor,
 calibrated from cold measurements where the one-time trace had been divided
@@ -289,10 +315,16 @@ If `predicted_total > FLAGQUANTUM_MCP_MAX_TRAIN_SECONDS` (default 60), the tool
 refuses and names the prediction, the width, the steps, and the variable that
 raises the bound.
 
-**At 24 qubits that refusal is total.** One step is 68 s, so no request above the
-default budget survives it — which is the right answer, but it is worth stating
-that the tool is not usable at the top of the width range the other tools
-support, rather than leaving a caller to discover it from a wall of arithmetic.
+At the top of the width range the state term alone is 25.2 s per step, so a
+24-wire call is admitted for at most two steps; the one-layer ansatz at that
+width, 71 instructions, predicts 119.1 s per step and is admitted for none. That
+is worth stating plainly rather than leaving a caller to discover it from a wall
+of arithmetic — but it is a statement about the *ansatz*, not about the width. A
+one-gate circuit at 24 wires is under the bound and runs. An earlier draft of
+this paragraph claimed the refusal at 24 qubits was total and that twenty-two
+was the widest width admitting a run, both of which were false by arithmetic
+alone: the 68 s and 119.6 s figures are properties of the 71-instruction circuit
+the design was calibrated on, not of the width.
 
 The description says this is an estimate rather than a measurement of the
 caller's machine.
