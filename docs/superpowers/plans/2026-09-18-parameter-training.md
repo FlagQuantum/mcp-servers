@@ -12,6 +12,13 @@
 
 ## Global Constraints
 
+- **Which directory a command runs in.** Every task assumes the shell starts
+  each command in the **repository root**. `git add flagquantum-mcp-server/...`
+  and `git checkout flagquantum-mcp-server/...` are written for that directory.
+  The mutation and verification blocks below open with
+  `cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"` rather than
+  `cd flagquantum-mcp-server`, so they work from either; use those forms, and
+  never leave a mutation applied because a restore path did not resolve.
 - Dependency range is `flagquantum>=0.2,<0.3` and `fastmcp>=3.2.0,<4`. Do not add a third declared dependency; `torch` is reached through the SDK.
 - No network egress, no credentials, no hardware. Every tool runs locally and deterministically.
 - Tools never raise across the MCP boundary; a failure returns `{"status": "error", "error": {"code": ..., "message": ...}}`.
@@ -288,7 +295,7 @@ Expected: PASS, same count as before the change.
 The claim is that `validate_pauli_terms` is now the only thing that validates. Break it and confirm the tests notice.
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/planning.py")
@@ -307,7 +314,7 @@ PY
 Expected: FAIL — `test_an_all_identity_term_is_refused_by_its_position` reports that no error was raised, or a length test does. Then restore:
 
 ```bash
-cd flagquantum-mcp-server && git checkout src/flagquantum_mcp_server/planning.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/planning.py
 ```
 
 If the suite passes with the validation removed, the extraction is decorative and the terms are being checked somewhere else — find out where before continuing.
@@ -574,7 +581,7 @@ Expected: PASS, same count. Then the lint and type gates, which will catch anyth
 The claim is that `simulation.py` now uses the shared refusal rather than its own. Confirm the shared one is load-bearing:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/preconditions.py")
@@ -587,7 +594,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_simulation.py -q
-git checkout src/flagquantum_mcp_server/preconditions.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/preconditions.py
 ```
 
 Expected: FAIL on the observable-refusal test before the restore. If it passes, `simulation.py` is still refusing on its own and the move is incomplete.
@@ -741,7 +748,7 @@ Expected: PASS.
 - [ ] **Step 7: Mutation-test the bound's fallback**
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/limits.py")
@@ -754,7 +761,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_api_contract.py -k training_budget -q
-git checkout src/flagquantum_mcp_server/limits.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/limits.py
 ```
 
 Expected: FAIL on the malformed-value test. A bound that reads `"0"` as zero would refuse every call for a deployment that meant "unlimited", which is the failure the fallback exists to prevent.
@@ -953,6 +960,12 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'flagquantum_mcp_serve
 
 Create `flagquantum-mcp-server/src/flagquantum_mcp_server/training.py`:
 
+**The import block below is deliberately minimal.** It carries what *this
+task's* code uses and nothing else, because `ruff` selects `F` and an unused
+import fails `ruff check .`. Later tasks in this plan extend it as they add the
+code that needs each name — Task 5 adds nothing, Task 6 adds `load_module` and
+`validate_pauli_terms`, Task 7 adds the rest. Do not import ahead of the code.
+
 ```python
 """Train a circuit's parameters against a Pauli-sum energy, in one call.
 
@@ -985,24 +998,11 @@ input, so a prediction decides before any work starts. See ``predict_seconds``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from flagquantum_mcp_server import limits
-from flagquantum_mcp_server._bridge import load_sdk, load_torch
-from flagquantum_mcp_server.circuits import (
-    CircuitFormat,
-    CircuitPayload,
-    circuit_from_ir,
-    resolve_ir,
-)
-from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
-from flagquantum_mcp_server.planning import validate_pauli_terms
-from flagquantum_mcp_server.preconditions import (
-    SDK_FAILURE_BASES,
-    plain,
-    reject_circuit_observables,
-)
+from flagquantum_mcp_server._bridge import load_sdk
+from flagquantum_mcp_server.circuits import circuit_from_ir
 
 # The one Python name a parameter value may travel under when it is a symbol
 # rather than a number. Its presence is what makes the argument a tensor.
@@ -1097,7 +1097,7 @@ Expected: PASS, 8 tests.
 Run each mutation, watch it go red, restore. The `assert after != before` line is not decoration: an earlier session shipped a mutation whose replacement target spanned two string literals, so nothing changed and the suite stayed green for a reason that had nothing to do with the test.
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -1110,13 +1110,13 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_a_replay_of_a_numeric_circuit_is_byte_for_byte_the_same_circuit` and `test_a_matrix_gate_survives_the_replay`.
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -1129,7 +1129,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_the_replay_binds_each_symbol_by_name_not_by_position`. That test uses two parameters and binds them in reverse order precisely so that a positional replay cannot pass.
@@ -1271,7 +1271,8 @@ Expected: FAIL with `ImportError: cannot import name 'predict_seconds'`
 
 - [ ] **Step 3: Write the model**
 
-Add to `training.py`:
+Add to `training.py`. No new imports: this is arithmetic on `ir` and `steps`,
+and the three constants it defines are the module's own.
 
 ```python
 # The budget model's three constants. Calibrated from warm per-step measurements
@@ -1329,7 +1330,7 @@ Expected: PASS, 13 tests.
 The claim is that the prediction is an upper bound. Break it downward and confirm the calibration test notices.
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -1339,13 +1340,13 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL, naming the width whose prediction fell below its measurement. Then confirm the floor is load-bearing the same way:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -1355,7 +1356,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k over_predicts -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL at 4 and 8 qubits.
@@ -1442,7 +1443,13 @@ Expected: FAIL with `ImportError: cannot import name 'hamiltonian_from_terms'`
 
 - [ ] **Step 3: Write the builder**
 
-Add to `training.py`:
+Add to `training.py`, and extend its import block with the two names this code
+uses:
+
+```python
+from flagquantum_mcp_server._bridge import load_module, load_sdk
+from flagquantum_mcp_server.planning import validate_pauli_terms
+```
 
 ```python
 def hamiltonian_from_terms(terms: Any, *, n_wires: int) -> Any:
@@ -1554,7 +1561,7 @@ normalizer does with the result — this is worth knowing, not just worth
 asserting:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -1571,7 +1578,7 @@ from flagquantum_mcp_server.training import hamiltonian_from_terms
 term = hamiltonian_from_terms([{'pauli': 'IX'}], n_wires=2).terms[0]
 print('ops after the SDK normalized it:', term.ops)
 "
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 `_normalize_pauli` in the SDK filters identities out of its `ops` tuple, so the
@@ -1581,7 +1588,7 @@ would be a test that passes for the wrong reason. Confirm the numbering a
 different way — that `"IX"` puts its `X` on wire 1 and not wire 0:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from flagquantum_mcp_server.training import hamiltonian_from_terms
 assert hamiltonian_from_terms([{"pauli": "IX"}], n_wires=2).terms[0].ops == ((1, "x"),), "IX is on the wrong wire"
@@ -1798,7 +1805,30 @@ Note: the refusal test at 16 qubits uses `[{"pauli": "I"*16, ...}]`, which the s
 
 - [ ] **Step 3: Write the tool body**
 
-Add to `training.py`:
+Add to `training.py`, and extend its import block to this complete set — every
+name here is used by this task's code, and `ruff`'s `F401` will say so if one is
+not:
+
+```python
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
+
+from flagquantum_mcp_server import limits
+from flagquantum_mcp_server._bridge import load_module, load_sdk, load_torch
+from flagquantum_mcp_server.circuits import (
+    CircuitFormat,
+    CircuitPayload,
+    circuit_from_ir,
+    resolve_ir,
+)
+from flagquantum_mcp_server.errors import ToolInputError, ToolLimitError
+from flagquantum_mcp_server.planning import validate_pauli_terms
+from flagquantum_mcp_server.preconditions import (
+    SDK_FAILURE_BASES,
+    plain,
+    reject_circuit_observables,
+)
+```
 
 ```python
 def train_parameters(
@@ -2116,7 +2146,7 @@ If `test_the_hamiltonian_reaches_the_objective` fails by converging to -1, the `
 - [ ] **Step 5: Mutation-test the policy, which is the point of the module**
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -2128,7 +2158,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_the_hamiltonian_reaches_the_objective` — the run converges to `-1.0` instead of `-2.236`. If it passes, the policy is being set somewhere else and this tool is not the thing under test.
@@ -2136,7 +2166,7 @@ Expected: FAIL on `test_the_hamiltonian_reaches_the_objective` — the run conve
 Then the continuation promise:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -2149,7 +2179,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k final_loss -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_final_loss_is_the_loss_of_the_parameters_returned_not_the_one_before`.
@@ -2158,7 +2188,7 @@ Then the budget check's *ordering*, which is the claim that a refusal costs
 nothing and a caller is never left waiting:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/training.py")
@@ -2174,7 +2204,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_training.py -k budget -q
-git checkout src/flagquantum_mcp_server/training.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/training.py
 ```
 
 Expected: FAIL on `test_a_run_past_the_budget_is_refused_before_any_work_starts`.
@@ -2384,7 +2414,7 @@ Expected: PASS, 44 tests.
 Each refusal is a guard clause. The mutation is to delete it and watch exactly one test go red. Run this loop and read the output rather than trusting it:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 import re, subprocess, sys
 from pathlib import Path
@@ -2613,7 +2643,7 @@ Expected: PASS. `test_every_tool_argument_is_covered` compares the cases against
 The wiring test's whole purpose is to notice a dropped argument. Confirm it does:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("src/flagquantum_mcp_server/server.py")
@@ -2626,7 +2656,7 @@ assert after != before, "mutation did not apply"
 p.write_text(after)
 PY
 ../.venv/bin/pytest tests/test_tool_wiring.py -q
-git checkout src/flagquantum_mcp_server/server.py
+cd "$(git rev-parse --show-toplevel)" && git checkout flagquantum-mcp-server/src/flagquantum_mcp_server/server.py
 ```
 
 Expected: FAIL on the `train_parameters_tool` case, because the starting values no longer reach the optimizer.
@@ -2739,7 +2769,7 @@ Run: `../.venv/bin/pytest tests/test_api_contract.py -q`
 Expected: PASS. Then confirm the pin bites:
 
 ```bash
-cd flagquantum-mcp-server
+cd "$(git rev-parse --show-toplevel)/flagquantum-mcp-server"
 python3 - <<'PY'
 from pathlib import Path
 p = Path("tests/test_api_contract.py")
