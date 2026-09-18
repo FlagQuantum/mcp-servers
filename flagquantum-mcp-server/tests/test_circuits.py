@@ -74,6 +74,22 @@ def test_round_trip_detects_non_canonical_input(bell_qir: str) -> None:
     assert deserialize(respaced)["round_trip_stable"] is False
 
 
+def test_round_trip_reports_the_input_not_the_requested_indent(bell_qir: str) -> None:
+    """The flag is about the caller's text, not about how it is displayed.
+
+    It used to compare against the re-serialization returned in the payload, so
+    asking for ``indent=2`` flipped it to False for a payload that was already
+    canonical — reporting a display preference as a stability problem.
+    """
+    canonical = serialize(bell_qir, QIR_FORMAT)["ir_json"]
+
+    assert deserialize(canonical, indent=2)["round_trip_stable"] is True
+    assert deserialize(canonical)["round_trip_stable"] is True
+
+    respaced = json.dumps(json.loads(canonical), indent=2)
+    assert deserialize(respaced, indent=2)["round_trip_stable"] is False
+
+
 def test_unknown_format_is_rejected(bell_qir: str) -> None:
     with pytest.raises(UnsupportedFormatError, match="circuit_format must be one of"):
         resolve_ir(bell_qir, "qasm3")

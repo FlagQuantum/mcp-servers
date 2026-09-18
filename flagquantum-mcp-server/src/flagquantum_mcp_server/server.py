@@ -161,13 +161,16 @@ def serialize_circuit_tool(
 def deserialize_circuit_tool(ir_json: str, indent: int | None = None) -> dict[str, Any]:
     """Validate IR JSON and report whether it round-trips unchanged.
 
+    ``round_trip_stable`` compares the text you sent against FlagQuantum's
+    canonical serialization, which is compact. It is about your input, not
+    about ``indent``: asking for indented output does not change it.
+
     Args:
         ir_json: FlagQuantum IR JSON text.
         indent: Optional indentation width for the canonical re-serialization.
 
     Returns:
-        The circuit identity, the canonical IR JSON, and round_trip_stable —
-        whether re-serializing reproduced the same content hash.
+        The circuit identity, the canonical IR JSON, and round_trip_stable.
     """
     return deserialize(ir_json, indent=indent)
 

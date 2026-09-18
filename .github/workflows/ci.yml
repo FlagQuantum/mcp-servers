@@ -73,6 +73,14 @@ jobs:
         working-directory: flagquantum-mcp-server
         run: pytest -m integration
 
+      - name: The documented example must still run
+        # examples/stdio_client.py is what the README and examples/README.md
+        # tell a newcomer to run, and it is the reference for how a host drives
+        # this server. Nothing else executes it, so without this step it can rot
+        # silently while every test stays green.
+        working-directory: flagquantum-mcp-server
+        run: python examples/stdio_client.py
+
   package:
     name: Build and smoke-test the wheel
     runs-on: ubuntu-latest

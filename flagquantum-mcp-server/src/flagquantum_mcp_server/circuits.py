@@ -51,6 +51,13 @@ CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 # parameters", so the input boundary rejects it rather than passing it on.
 VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression", "$complex", "$tensor")
 
+# How deep an expression may nest before the input is refused. An expression
+# nests through ``$expression.args``, so validation recurses; real ansatze
+# nest two or three deep, and the bound keeps a pathological payload from
+# reaching Python's recursion limit, where it would surface as an internal
+# error rather than a readable one.
+MAX_VALUE_DEPTH = 32
+
 
 def resolve_ir(circuit: CircuitPayload, circuit_format: CircuitFormat = IR_FORMAT) -> Any:
     """Parse caller input and return a validated ``CircuitIR``.
@@ -350,12 +357,12 @@ def _check_parameter_values(params: Any, gate: str, prefix: str) -> None:
         _check_parameter_value(value, str(name), gate, prefix)
 
 
-def _check_parameter_value(value: Any, name: str, gate: str, prefix: str) -> None:
+def _check_parameter_value(value: Any, name: str, gate: str, prefix: str, depth: int = 0) -> None:
     """Check one parameter value against the shapes the SDK can decode."""
     if isinstance(value, (int, float)):
         return
     if isinstance(value, Mapping):
-        _check_marker(value, name, gate, prefix)
+        _check_marker(value, name, gate, prefix, depth)
         return
     reason = (
         "a string is stored as an ordinary value rather than a symbol"
@@ -370,7 +377,9 @@ def _check_parameter_value(value: Any, name: str, gate: str, prefix: str) -> Non
     )
 
 
-def _check_marker(value: Mapping[str, Any], name: str, gate: str, prefix: str) -> None:
+def _check_marker(
+    value: Mapping[str, Any], name: str, gate: str, prefix: str, depth: int = 0
+) -> None:
     """Check a mapping parameter value against the SDK's marker vocabulary."""
     if not any(marker in value for marker in VALUE_MARKERS):
         raise ToolInputError(
@@ -388,6 +397,43 @@ def _check_marker(value: Mapping[str, Any], name: str, gate: str, prefix: str) -
                 f"marker {symbol!r}; it must be a non-empty string naming the "
                 f'symbol, as in {{"$parameter": "{name}"}}.'
             )
+    if "$expression" in value:
+        _check_expression(value["$expression"], name, gate, prefix, depth)
+
+
+def _check_expression(expression: Any, name: str, gate: str, prefix: str, depth: int) -> None:
+    """Check an expression, whose arguments are themselves parameter values.
+
+    An expression nests, so a misspelled marker inside one is the same silent
+    failure as a misspelled marker at the top level: the SDK keeps the unknown
+    key as an opaque value, and the circuit stops reading as parameterized. The
+    ``$expression`` branch above is the only place a symbol legitimately nests,
+    so this is the only recursion.
+    """
+    if depth >= MAX_VALUE_DEPTH:
+        raise ToolInputError(
+            f"{prefix} ({gate!r}) parameter {name!r} nests expressions more than "
+            f"{MAX_VALUE_DEPTH} deep. Flatten it, or call bind_parameters_tool "
+            "with the values you have."
+        )
+    where = f"{prefix} ({gate!r}) parameter {name!r} '$expression'"
+    if not isinstance(expression, Mapping):
+        raise ToolInputError(
+            f"{where} {_describe(expression)}; it must be an object with "
+            "'op' and 'args', as in "
+            '{"$expression": {"op": "mul", "args": [2, {"$parameter": "theta"}]}}.'
+        )
+    missing = sorted({"op", "args"} - set(expression))
+    if missing:
+        raise ToolInputError(f"{where} is missing {missing}.")
+    arguments = expression["args"]
+    if not isinstance(arguments, Sequence) or isinstance(arguments, (str, bytes)):
+        raise ToolInputError(
+            f"{where} has args {arguments!r}; it must be a list of numbers, "
+            "symbols or nested expressions."
+        )
+    for argument in arguments:
+        _check_parameter_value(argument, name, gate, prefix, depth + 1)
 
 
 def _describe(value: Any) -> str:
@@ -509,14 +555,20 @@ def deserialize(ir_json: str, *, indent: int | None = None) -> dict[str, Any]:
 
     Returns:
         A payload with the circuit identity, the canonical IR JSON, and
-        ``round_trip_stable`` recording whether re-serializing reproduced the
-        same content hash.
+        ``round_trip_stable`` recording whether the text sent was already in
+        FlagQuantum's canonical form.
 
     Raises:
         ToolError: If the payload is invalid or exceeds a configured bound.
     """
     ir = resolve_ir(ir_json, IR_FORMAT)
     canonical = ir_to_json(ir, indent=indent)
+    # Compared against the compact form, not the text being returned. The
+    # question is whether the caller's text was already canonical, and that has
+    # nothing to do with how they asked to have it displayed: comparing against
+    # `canonical` would report False for a canonical payload whenever an indent
+    # was requested.
+    round_trip_stable = ir_to_json(ir, indent=None) == ir_json
     return {
         "status": "success",
         "format": IR_FORMAT,
@@ -525,7 +577,7 @@ def deserialize(ir_json: str, *, indent: int | None = None) -> dict[str, Any]:
         "n_instructions": len(ir.instructions),
         "ir_version": str(ir.version),
         "content_hash": str(ir.content_hash),
-        "round_trip_stable": canonical == ir_json,
+        "round_trip_stable": round_trip_stable,
     }
 
 

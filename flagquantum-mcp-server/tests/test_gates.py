@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from flagquantum_mcp_server.circuits import resolve_ir
+from flagquantum_mcp_server.circuits import MAX_VALUE_DEPTH, VALUE_MARKERS, resolve_ir
 from flagquantum_mcp_server.errors import ToolInputError
 from flagquantum_mcp_server.gates import (
     closest_names,
@@ -238,3 +238,125 @@ def test_an_empty_parameter_name_is_rejected() -> None:
 def test_a_null_angle_is_rejected() -> None:
     with pytest.raises(ToolInputError, match="null"):
         resolve_ir(_gate("ry", [0], parameters={"theta": None}), "qir")
+
+
+# --- expressions nest, so the check has to recurse ---
+#
+# ``$expression`` carries its operands in ``args``, and an operand is itself a
+# parameter value. A misspelled marker one level down is the same silent failure
+# as one at the top level: the SDK keeps the unknown key as an opaque value, the
+# expression stops reading as parameterized, and inspect says "no parameters".
+
+
+def _expression(*args: object, op: str = "mul") -> dict[str, object]:
+    return {"$expression": {"op": op, "args": list(args)}}
+
+
+def test_a_nested_symbol_is_accepted() -> None:
+    ir = resolve_ir(
+        _gate("ry", [0], parameters={"theta": _expression(2, {"$parameter": "t"})}), "qir"
+    )
+
+    assert ir.instructions[0].params["theta"].op == "mul"
+
+
+def test_a_misspelled_marker_inside_an_expression_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match=r"\$bogus"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": _expression(2, {"$bogus": 1})}), "qir")
+
+
+def test_a_string_operand_inside_an_expression_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="is a string"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": _expression(2, "t")}), "qir")
+
+
+def test_an_expression_missing_its_operands_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match=r"is missing \['args'\]"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": {"$expression": {"op": "mul"}}}), "qir")
+
+
+def test_an_expression_whose_args_are_not_a_list_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match="must be a list"):
+        resolve_ir(
+            _gate("ry", [0], parameters={"theta": {"$expression": {"op": "m", "args": 2}}}), "qir"
+        )
+
+
+def test_an_expression_that_is_not_an_object_is_rejected() -> None:
+    with pytest.raises(ToolInputError, match=r"'\$expression' is a string"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": {"$expression": "mul"}}), "qir")
+
+
+def test_nesting_within_the_bound_is_accepted() -> None:
+    value: object = {"$parameter": "t"}
+    for _ in range(MAX_VALUE_DEPTH - 2):
+        value = _expression(value, 1, op="add")
+
+    ir = resolve_ir(_gate("ry", [0], parameters={"theta": value}), "qir")
+
+    assert ir.instructions[0].params["theta"].op == "add"
+
+
+def test_nesting_past_the_bound_is_refused_rather_than_crashing() -> None:
+    """The bound exists so a pathological payload cannot reach Python's limit.
+
+    Without it the recursion would raise RecursionError, which leaves the server
+    through the catch-all as INTERNAL_ERROR — a readable refusal is better than
+    an internal error, and much better than a crash.
+    """
+    value: object = {"$parameter": "t"}
+    for _ in range(MAX_VALUE_DEPTH + 2):
+        value = _expression(value, 1, op="add")
+
+    with pytest.raises(ToolInputError, match=f"more than {MAX_VALUE_DEPTH} deep"):
+        resolve_ir(_gate("ry", [0], parameters={"theta": value}), "qir")
+
+
+# --- the marker vocabulary has to track the SDK's own decoder ---
+#
+# ``VALUE_MARKERS`` mirrors the keys ``flagquantum.core.ir`` decodes, and it is
+# written by hand. If the SDK ever emits a fifth kind of value, validation here
+# would reject a perfectly legal circuit. So rather than trusting the copy, this
+# asks the SDK to serialize every kind of parameter value it can build and
+# checks that the markers it produces are the ones accepted.
+
+
+def _markers_the_sdk_emits() -> set[str]:
+    """Serialize one circuit per parameter kind, and collect the marker keys."""
+    import flagquantum as fq
+
+    values: list[object] = [fq.Parameter("t"), 2 * fq.Parameter("t"), 1 + 2j]
+    torch = pytest.importorskip("torch", reason="the tensor marker needs torch")
+    values.append(torch.tensor(0.5))
+
+    markers: set[str] = set()
+    for value in values:
+        ir = fq.Circuit(1).ry(0, value).to_ir().to_dict()
+        for key in ir["instructions"][0]["params"]["theta"]:
+            if key.startswith("$"):
+                markers.add(key)
+    return markers
+
+
+def test_the_accepted_markers_are_exactly_the_ones_the_sdk_emits() -> None:
+    emitted = _markers_the_sdk_emits()
+
+    assert emitted == set(VALUE_MARKERS), (
+        "VALUE_MARKERS has drifted from flagquantum.core.ir: "
+        f"emitted {sorted(emitted)}, accepted {sorted(VALUE_MARKERS)}"
+    )
+
+
+def test_every_marker_the_sdk_emits_is_accepted_here() -> None:
+    """The failure this prevents: validation refusing a circuit the SDK built."""
+    for marker in _markers_the_sdk_emits():
+        value = {
+            "$parameter": {"$parameter": "t"},
+            "$expression": {"$expression": {"op": "mul", "args": [2, {"$parameter": "t"}]}},
+            "$complex": {"$complex": [1.0, 2.0]},
+            "$tensor": {"$tensor": {"dtype": "float32", "shape": [], "data": 0.5}},
+        }[marker]
+
+        ir = resolve_ir(_gate("ry", [0], parameters={"theta": value}), "qir")
+
+        assert ir.instructions[0].params["theta"] is not None, marker
