@@ -258,3 +258,42 @@ async def test_export_prompt_mentions_the_qcis_limitation() -> None:
     rendered = await mcp.render_prompt("export_circuit", {"circuit": "[]", "target_format": "qcis"})
 
     assert "matrix gate" in str(rendered)
+
+
+async def test_the_ir_schema_resource_says_what_the_hash_covers() -> None:
+    """`content_hash` hashes the payload, metadata included.
+
+    An agent session noticed the same circuit reporting two different hashes
+    and explained it correctly: the second payload had `metadata` stripped. The
+    hash is the SDK's own, and omitting an optional field is legal, so the fix
+    is to say what the hash covers rather than to change it. A caller that
+    treats it as a gate-sequence identity will be surprised.
+    """
+    result = await mcp.read_resource("flagquantum://ir-schema")
+    payload = json.loads(result.contents[0].content)
+
+    notes = " ".join(payload["notes"])
+    assert "'metadata'" in notes
+    assert "identifies the payload" in notes
+
+
+def test_an_ir_payload_without_metadata_is_legal_but_hashes_differently(
+    bell_qir: str,
+) -> None:
+    """Pins the behaviour the resource now documents.
+
+    If FlagQuantum ever starts normalizing metadata on load, this test fails and
+    the note above becomes wrong — which is the point.
+    """
+    from flagquantum_mcp_server.circuits import serialize
+
+    canonical = json.loads(serialize(bell_qir, "qir")["ir_json"])
+    assert "metadata" in canonical
+
+    trimmed = {key: value for key, value in canonical.items() if key != "metadata"}
+    from flagquantum_mcp_server.analysis import analyze
+
+    with_metadata = analyze(json.dumps(canonical), "ir")["circuit"]["content_hash"]
+    without_metadata = analyze(json.dumps(trimmed), "ir")["circuit"]["content_hash"]
+
+    assert with_metadata != without_metadata

@@ -61,7 +61,9 @@ A typical session:
 
 Read the flagquantum://gate-set resource for the available gate names and
 flagquantum://ir-schema for the IR envelope. IR JSON is the canonical format;
-every IR payload carries an ir_version and a content_hash that identifies it.
+every IR payload carries an ir_version and a content_hash. The hash covers the
+whole payload, metadata included, so two payloads with the same gates but
+different metadata hash differently; see flagquantum://ir-schema.
 """
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -516,7 +518,13 @@ def ir_schema_resource() -> dict[str, Any]:
             "Instructions encode the gate name under the 'opcode' key.",
             "Every IR payload carries 'kind': 'flagquantum.circuit_ir'.",
             "Unknown top-level keys are rejected.",
-            "content_hash is the SHA-256 of the canonical JSON.",
+            (
+                "content_hash is the SHA-256 of the canonical JSON, which includes "
+                "the 'metadata' object. A payload that omits 'metadata' is accepted "
+                "(it defaults to {}) but hashes differently from the same circuit "
+                "carrying its runtime metadata, so the hash identifies the payload, "
+                "not the gate sequence alone."
+            ),
         ],
     }
 

@@ -144,6 +144,15 @@ Either format can be passed to any tool; `serialize_circuit_tool` converts
 QASM parser, so there is nothing to convert it with; a caller holding OpenQASM
 has to load it into FlagQuantum itself and send the resulting IR.
 
+### On `content_hash`
+
+Every payload carries the SDK's `content_hash`, which is the SHA-256 of the
+canonical JSON **including the `metadata` object**. An IR payload that omits
+`metadata` is legal — it defaults to `{}` — but it hashes differently from the
+same circuit carrying its runtime metadata. Treat the hash as identifying the
+payload, not the gate sequence alone. The `flagquantum://ir-schema` resource
+says the same thing where an agent will read it.
+
 ## Limits
 
 Every bound is overridable by environment variable, so a deployment can tighten
