@@ -7,4 +7,4 @@ Keep in sync with ``pyproject.toml`` and ``server.json``; a test enforces it.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
