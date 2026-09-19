@@ -66,6 +66,36 @@ def _numeric(value: Any) -> float:
     return float(value)
 
 
+def _agrees(got: Any, want: Any, *, atol: float, rtol: float = 1e-6) -> bool:
+    """Compare two tensors elementwise, with no numpy in the room.
+
+    ``pytest.approx`` cannot be trusted to do this, and the reason is not
+    obvious from its name. It converts a tensor to an ndarray only when
+    ``numpy`` is **already in** ``sys.modules``: ``_pytest/python_api.py``'s
+    ``_as_numpy_array`` reads the module table rather than importing, so with
+    numpy absent it returns ``None`` and the dispatch falls through to
+    ``ApproxSequenceLike`` — which refuses a tensor of tensors with "does not
+    support nested data structures".
+
+    numpy is declared nowhere in this project, in its dev extra, or by the CPU
+    torch wheel, so which branch runs depends on the environment rather than on
+    the code. Measured: these two assertions passed on a desktop venv carrying
+    numpy 2.5.3 as an undeclared transitive accident, and failed on all three
+    CI interpreters, where torch's own startup warning is the only mention of
+    numpy in the entire log.
+
+    ``torch.allclose`` has no such branch. It is the tensor library these
+    values came from, torch is a hard dependency already, and its tolerance is
+    additive where ``approx``'s is the larger of the two — marginally more
+    permissive, by far less than the fp32 noise either is there to absorb.
+    ``rtol`` is ``approx``'s own default, so the switch does not quietly
+    loosen a tolerance.
+    """
+    import torch
+
+    return bool(torch.allclose(got, want, rtol=rtol, atol=atol))
+
+
 # --- the replay reproduces the circuit it was given ---
 
 
@@ -98,6 +128,16 @@ def test_a_replayed_circuit_executes_and_agrees_with_its_source() -> None:
     byte-for-byte equal to its source on this same circuit and failed to
     execute. Serializing correctly is not the property that matters — producing
     the same numbers is, and only running it shows that.
+
+    "The same numbers" is two claims here, not one, and the second was measured
+    missing. This circuit ends in a matrix gate ``diag(1, i)``, which is
+    diagonal, so conjugating it to ``diag(1, -i)`` leaves every computational-
+    basis probability identical to the last bit while flipping a sign in the
+    state. Measured: with the replay mutated to pass the conjugated matrix,
+    ``probabilities`` came back equal and the assertion passed — because a
+    diagonal phase is invisible to a measurement in that basis. ``<Y₁>``
+    separates them, ``+0.6442`` against ``-0.6442``, so the state is compared
+    through an observable that can see a phase and not only a magnitude.
     """
     import flagquantum as fq
 
@@ -107,9 +147,19 @@ def test_a_replayed_circuit_executes_and_agrees_with_its_source() -> None:
 
     rebuilt = replay_builder(ir)({})
 
-    want = fq.run(source, outputs=[fq.probabilities([0, 1])]).measurements[0].value
-    got = fq.run(rebuilt, outputs=[fq.probabilities([0, 1])]).measurements[0].value
-    assert got == pytest.approx(want, abs=1e-9)
+    def run(circuit):
+        return [
+            fq.run(circuit, outputs=[request]).measurements[0].value
+            for request in (fq.probabilities([0, 1]), fq.expectation(fq.Y(1)))
+        ]
+
+    want = run(source)
+    got = run(rebuilt)
+
+    for index, label in enumerate(("probabilities", "<Y1>")):
+        assert _agrees(got[index], want[index], atol=1e-9), (
+            f"{label}: {got[index].tolist()} != {want[index].tolist()}"
+        )
 
 
 def test_a_parameter_inside_an_expression_is_substituted() -> None:
@@ -288,7 +338,7 @@ def test_a_replayed_parameterized_circuit_evaluates_the_same_as_a_bound_one() ->
     want = fq.run(bound, outputs=[fq.probabilities([0, 1])]).measurements[0].value
     got = fq.run(replayed, outputs=[fq.probabilities([0, 1])]).measurements[0].value
 
-    assert got == pytest.approx(want, abs=1e-6)
+    assert _agrees(got, want, atol=1e-6), f"{got.tolist()} != {want.tolist()}"
 
 
 # --- the budget model ---
