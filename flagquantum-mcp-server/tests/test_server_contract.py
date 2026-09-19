@@ -7,6 +7,7 @@ server, or a schema changing shape in a way a client depends on.
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from fastmcp import FastMCP
@@ -271,6 +272,7 @@ async def test_the_ir_schema_resource_shows_how_to_write_a_symbol() -> None:
         ("emit_openqasm_tool", "measures every wire"),
         ("simulate_circuit_tool", "not_measured"),
         ("simulate_circuit_tool", "executes in this"),
+        ("simulate_circuit_tool", "empty strings"),
         ("train_parameters_tool", "continue a run"),
     ],
 )
@@ -278,6 +280,89 @@ async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, p
     description = (await mcp.get_tool(tool)).description or ""
 
     assert phrase in description, f"{tool} does not publish {phrase!r}"
+
+
+async def test_every_execution_mode_the_description_names_actually_runs(bell_qir: str) -> None:
+    """The description offers five engines, so all five have to work.
+
+    Naming an engine is a promise about what the tool accepts, and nothing else
+    in the suite reads the mode list: a mode can stop being accepted upstream,
+    or leave the description, and every other test still passes. The set is
+    taken from the SDK's own refusal rather than copied here, so an engine
+    added or removed upstream arrives as a description that disagrees with the
+    SDK, which is the thing worth failing on.
+
+    Accepting the spelling is not the claim, though — running the circuit is.
+    Each engine is asked for the same two wires of the same Bell state, and the
+    distributions have to agree, so a mode that silently returns something else
+    fails here.
+    """
+    description = (await mcp.get_tool("simulate_circuit_tool")).description or ""
+
+    # The names have to be where they are offered, not merely somewhere in the
+    # description. They are also named one at a time further down — a
+    # statevector run reports a path, "auto" resolves to one — so a check over
+    # the whole text survives the offering clause losing a name. Measured: the
+    # first version of this test searched the whole description and a mutation
+    # that deleted "mps" from the offer was MISSED, because "mps" still
+    # appeared in the provenance sentence. Splitting on the offer's own wording
+    # is what closes that, and requiring the marker makes a reword fail loudly
+    # instead of silently widening the window to the whole text.
+    offer = description.split("and all five the SDK offers are reachable")
+    assert len(offer) == 2, "the description no longer offers the modes in one place"
+    offered = set(re.findall(r'"([a-z_]+)"', offer[1].split(";", 1)[0]))
+
+    refusal = await mcp.call_tool(
+        "simulate_circuit_tool",
+        {
+            "circuit": bell_qir,
+            "circuit_format": "qir",
+            "options": {"mode": "not-a-mode"},
+            "outputs": [{"kind": "probabilities", "wires": [0, 1]}],
+        },
+    )
+    assert refusal.structured_content is not None
+    error = refusal.structured_content["error"]
+    assert error["code"] == "INVALID_INPUT"
+    modes = [name.strip() for name in error["message"].split("mode must be one of:")[1].split(",")]
+
+    async def probabilities(mode: str) -> list[float]:
+        result = await mcp.call_tool(
+            "simulate_circuit_tool",
+            {
+                "circuit": bell_qir,
+                "circuit_format": "qir",
+                "options": {"mode": mode},
+                "outputs": [{"kind": "probabilities", "wires": [0, 1]}],
+            },
+        )
+        payload = result.structured_content
+        assert payload is not None, mode
+        assert payload["status"] == "success", payload
+        execution = payload["execution"]
+        # "auto" is a request the SDK resolves, not a name it echoes back:
+        # measured, the field reports the engine it settled on. Every other
+        # spelling is reported as itself.
+        assert execution["mode"] == ("statevector" if mode == "auto" else mode), execution
+        assert execution["accuracy"]["metric"] == "not_measured", execution
+        # Measured: a statevector run reports a path and a provider; the other
+        # three report both as empty strings. Since "auto" resolves to a
+        # statevector run here, it reports them too.
+        statevector_run = mode in {"statevector", "auto"}
+        assert execution["execution_path"] == ("local_statevector" if statevector_run else ""), (
+            execution
+        )
+        assert execution["platform_provider"] == ("pytorch_cpu" if statevector_run else ""), (
+            execution
+        )
+        return payload["outputs"][0]["value"]
+
+    reference = await probabilities("statevector")
+
+    assert set(modes) == {"auto", "density_matrix", "mps", "statevector", "tensor_network"}
+    assert set(modes) <= offered, f"the offer does not name {sorted(set(modes) - offered)}"
+    for mode in modes:
+        assert await probabilities(mode) == pytest.approx(reference, abs=1e-6), mode
 
 
 async def test_no_tool_hides_its_only_documentation_in_a_returns_section() -> None:

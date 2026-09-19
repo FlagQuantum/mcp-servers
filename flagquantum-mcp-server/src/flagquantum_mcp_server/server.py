@@ -414,12 +414,25 @@ def simulate_circuit_tool(
     """Run a circuit locally and return the outputs it was asked for.
 
     This is the only tool here that executes anything, and it executes in this
-    process: a statevector simulation on CPU, with no network, no credentials
-    and no provider. The result carries the SDK's own provenance
-    (execution_path "local_statevector", platform_provider "pytorch_cpu") and
-    its accuracy contract, which reports metric "not_measured" — an ideal
-    simulation is not evidence about any hardware, and this tool does not
-    present it as such.
+    process on CPU: no network, no credentials, no provider. The engine is
+    chosen by options["mode"], and all five the SDK offers are reachable —
+    "statevector" (the default), "mps", "tensor_network", "density_matrix" and
+    "auto"; a sixth spelling is refused with the five named. They are engines
+    of one local run rather than different places to run, so none of them
+    leaves this process — but they are not interchangeable in cost, and the
+    spread is wider than the circuit's width suggests. Measured at 20 wires on
+    a product state, plan_execution_tool's summary reports 8 MB of state for
+    "statevector" and 8.8 TB for "density_matrix". Ask the plan before
+    choosing a non-default mode. The result's "execution" block records the
+    engine that ran, alongside "simulation_engine", "device" and the accuracy
+    contract whose metric is "not_measured" — an ideal simulation is not
+    evidence about any hardware, and this tool does not present it as such.
+    That field holds the engine, not the request: "auto" comes back as whatever
+    the SDK settled on — "statevector", since this tool passes no noise model —
+    rather than as the word "auto". "execution_path" and "platform_provider"
+    read "local_statevector" and "pytorch_cpu" for a statevector run and are
+    empty strings for "mps", "tensor_network" and "density_matrix", which is
+    how the SDK reports those engines rather than a failure.
 
     What is returned, in order of precedence: the outputs you pass; otherwise
     the circuit's own "measurements" field, which the SDK reads and which
