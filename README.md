@@ -99,7 +99,9 @@ would aggregate nothing. It can be added when a second server exists.
 remote-submission entry point, and QPU submission is a governed capability —
 preflight, approval, budget, evidence — that belongs to a control plane rather
 than to a local adapter any agent can call. Every tool in this repository runs
-locally, deterministically, with no credentials.
+locally, deterministically, with no credentials and no outbound request. A
+server may listen, so that a client which connects to servers rather than
+launching them can reach it; that is an inbound socket, not egress.
 
 **One dependency is unavoidable and it is heavy.** `flagquantum` requires
 `torch`, so any package here pulls it. The reference suite's four core servers

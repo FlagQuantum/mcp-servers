@@ -7,7 +7,14 @@
 An [MCP](https://modelcontextprotocol.io) server that gives any MCP-compatible
 agent local access to the [FlagQuantum](https://github.com/flagos-ai/FlagQuantum)
 SDK: build, compile, route, serialize and plan quantum circuits — and run them
-locally — with no credentials, no network access and no hardware submission.
+locally — with no credentials, no outbound network access and no hardware
+submission.
+
+"Outbound" is the load-bearing word. Every tool here runs in this process and
+reaches nothing; the server never calls a provider, reads a token or submits a
+job. It can also *listen*, so a gateway that connects to its clients rather than
+launching them can reach it — see [Serving over
+HTTP](#serving-over-http). An inbound listener is not egress.
 
 Part of [`FlagQuantum/mcp-servers`](https://github.com/FlagQuantum/mcp-servers).
 
@@ -17,8 +24,9 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Seventeen tools over stdio. Fifteen of them only read the circuit they are
-given; the other two run it, one to measure it and one to improve it.
+Seventeen tools, over stdio or over Streamable HTTP. Fifteen of them only read
+the circuit they are given; the other two run it, one to measure it and one to
+improve it.
 
 **Build and inspect**
 
@@ -112,6 +120,55 @@ claude mcp add flagquantum -- uvx flagquantum-mcp-server
 ```bash
 npx @modelcontextprotocol/inspector uvx flagquantum-mcp-server
 ```
+
+### Serving over HTTP
+
+A client that launches a process — Claude Code, Claude Desktop, the Inspector —
+uses the default stdio transport and needs nothing below. A client that instead
+*connects* to servers, such as a gateway holding several of them, needs the
+server to listen:
+
+```bash
+flagquantum-mcp-server --transport http --host 0.0.0.0 --port 8105 \
+    --allowed-host quantum-mcp:8105
+```
+
+The endpoint is `/mcp` on that host and port, and it speaks Streamable HTTP.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--transport` | `stdio` | `stdio` or `http`. The default is unchanged, so nothing that already works needs editing |
+| `--host` | `127.0.0.1` | Interface to bind. Loopback by default: the server does not become reachable by accident |
+| `--port` | `8105` | Port to bind |
+| `--allowed-host` | none | A `Host` header the server will answer, repeatable |
+| `--allowed-origin` | none | A browser `Origin` the server will answer, repeatable |
+
+**Binding a non-loopback interface requires `--allowed-host`.** Without it the
+server refuses to start rather than listen on every interface with nothing
+checking who reaches it:
+
+```
+$ flagquantum-mcp-server --transport http --host 0.0.0.0
+usage: flagquantum-mcp-server [-h] ...
+flagquantum-mcp-server: error: --host 0.0.0.0 is not a loopback address, so the
+server would answer any Host header that reaches it. Name the hosts it should
+answer with --allowed-host HOST[:PORT], or bind 127.0.0.1.
+```
+
+Passing any `--allowed-host` or `--allowed-origin` turns host validation on; a
+request carrying an unlisted `Host` is answered **421 Misdirected Request**.
+Loopback hosts are always answered, so enabling validation cannot lock out a
+local client.
+
+Two things worth knowing if you are wiring this up:
+
+- **Configure validation through the settings object, not `http_app(
+  allowed_hosts=...)`.** That keyword appends to a list which is only consulted
+  once validation is on, so on its own it reads as a security setting and
+  enforces nothing. Measured on fastmcp 3.4.7: a bogus `Host` is answered `200`
+  with the keyword and `421` through the settings path.
+- **`--transport http` adds an inbound socket, not an outbound one.** No tool
+  gains a network path; rule 4 in [AGENTS.md](AGENTS.md) is unchanged.
 
 ## Circuit formats
 
@@ -345,8 +402,10 @@ failed call leaves the session usable for the next one, which
 
 ## What this server deliberately does not do
 
-- **No hardware, no credentials, no network.** FlagQuantum's own release 0.2.0
-  ships no remote-submission entry point, and this adapter adds none.
+- **No hardware, no credentials, no outbound network.** FlagQuantum's own
+  release 0.2.0 ships no remote-submission entry point, and this adapter adds
+  none. The HTTP transport opens a listening socket and changes nothing about
+  what a tool may do once a request arrives.
 - **No noise models.** A `NoiseModel` is a live SDK object rather than a
   serializable value, and every tool here takes and returns JSON.
 - **No in-tree coupling.** This package must never be imported by the

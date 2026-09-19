@@ -80,6 +80,18 @@ has configured a Qiskit MCP server already knows how to configure ours.
    `accuracy.metric == "not_measured"` as a simulation: a converged loss curve
    is not evidence about any machine either.
 
+   **An inbound listener is inside the line too.** `--transport http` makes the
+   server bind a socket and answer whoever connects. The rule is about egress —
+   remote jobs, tokens, providers, paid resources — and this changes none of
+   those: no tool gains a network path, and the default stays stdio. Two
+   constraints keep it there. A non-loopback bind **requires** `--allowed-host`,
+   so the server cannot listen on every interface with nothing checking who
+   reaches it; and host validation is configured through `fastmcp.settings`,
+   because `http_app(allowed_hosts=...)` appends to a list that is only
+   consulted once validation is on and therefore enforces nothing on its own —
+   measured, `200` versus `421` on a bogus `Host`. A listener nobody
+   authenticated is the failure both constraints exist to prevent.
+
 5. **Tools are read-only over the caller's inputs and side-effect free.** No
    tool may mutate files, environment variables, or global state.
 
