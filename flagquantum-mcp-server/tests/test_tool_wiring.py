@@ -157,6 +157,22 @@ def _simulated(payload: dict[str, Any]) -> None:
     assert payload["execution"]["execution_path"] == "local_statevector"
 
 
+def _planned_evolution(payload: dict[str, Any]) -> None:
+    assert payload["plan"]["n_times"] == 3
+    assert payload["plan"]["trajectory_bytes"] == 3 * 2 * 2 * 8
+    assert payload["plan"]["numerics"]["precision"] == "complex64"
+    assert payload["execution"]["network_access"] is False
+
+
+def _evolved_dynamics(payload: dict[str, Any]) -> None:
+    assert len(payload["times"]) == 3
+    assert len(payload["populations"]) == 3
+    assert payload["density_matrices"] is not None
+    assert set(payload["observables"]) == {"z"}
+    assert payload["numerics"]["precision"] == "complex64"
+    assert payload["execution"]["deterministic"] is True
+
+
 def _described_two_gates(payload: dict[str, Any]) -> None:
     assert [record["opcode"] for record in payload["gates"]] == ["rz", "ccx"]
     assert payload["gates"][1]["aliases"] == ["ccnot", "toffoli"]
@@ -284,6 +300,38 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
                 "outputs": [{"kind": "counts", "wires": [0]}],
             },
             _simulated,
+        )
+    ],
+    "plan_evolution_tool": [
+        (
+            {
+                "hamiltonian": [{"pauli": "X", "coefficient": 0.5, "wires": [0]}],
+                "initial_state": "1",
+                "n_wires": 1,
+                "times": [0.0, 0.05, 0.1],
+                "collapse_operators": [{"operator": "amplitude_damping", "rate": 0.1, "wire": 0}],
+                "observables": [{"name": "z", "pauli": "Z", "wires": [0]}],
+                "device": "cpu",
+                "precision": "complex64",
+                "return_density_matrices": True,
+            },
+            _planned_evolution,
+        )
+    ],
+    "evolve_dynamics_tool": [
+        (
+            {
+                "hamiltonian": [{"pauli": "X", "coefficient": 0.5, "wires": [0]}],
+                "initial_state": "1",
+                "n_wires": 1,
+                "times": [0.0, 0.05, 0.1],
+                "collapse_operators": [{"operator": "amplitude_damping", "rate": 0.1, "wire": 0}],
+                "observables": [{"name": "z", "pauli": "Z", "wires": [0]}],
+                "device": "cpu",
+                "precision": "complex64",
+                "return_density_matrices": True,
+            },
+            _evolved_dynamics,
         )
     ],
     "describe_gate_set_tool": [({"gates": ["rz", "ccx"]}, _described_two_gates)],

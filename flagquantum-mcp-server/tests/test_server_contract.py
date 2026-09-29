@@ -51,6 +51,8 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
         "deserialize_circuit_tool",
         "describe_topology_tool",
         "describe_gate_set_tool",
+        "plan_evolution_tool",
+        "evolve_dynamics_tool",
     }
 
     for name, tool in tools.items():
@@ -82,6 +84,8 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
                 "deserialize_circuit_tool",
                 "describe_topology_tool",
                 "describe_gate_set_tool",
+                "plan_evolution_tool",
+                "evolve_dynamics_tool",
             }, name
             continue
         schema = properties["circuit_format"]

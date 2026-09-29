@@ -33,6 +33,7 @@ from flagquantum_mcp_server.compilation import (
     route_circuit,
 )
 from flagquantum_mcp_server.drawing import draw_circuit
+from flagquantum_mcp_server.dynamics import Precision, evolve_dynamics, plan_evolution
 from flagquantum_mcp_server.emission import emit_openqasm, emit_qcis
 from flagquantum_mcp_server.errors import (
     INTERNAL_ERROR,
@@ -62,6 +63,11 @@ A typical session:
 5. Call plan_execution_tool to see how the SDK would execute it, then
    simulate_circuit_tool to run it locally and get counts, samples,
    probabilities or an expectation value.
+
+For driven open-system dynamics, use plan_evolution_tool and
+evolve_dynamics_tool. They take an explicit time grid and physical Lindblad
+rates; those rates are not instruction-level channel probabilities. Both run
+locally on CPU without a provider, credentials, hardware or network access.
 
 Read the flagquantum://gate-set resource for the available gate names and
 flagquantum://ir-schema for the IR envelope. IR JSON is the canonical format;
@@ -474,6 +480,85 @@ def simulate_circuit_tool(
         contract that records a local run as not measured.
     """
     return simulate_execution(circuit, circuit_format, options=options, outputs=outputs)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def plan_evolution_tool(
+    hamiltonian: Sequence[Mapping[str, Any]],
+    initial_state: Any,
+    n_wires: int,
+    times: Sequence[float],
+    collapse_operators: Sequence[Mapping[str, Any]],
+    observables: Sequence[Mapping[str, Any]] | None = None,
+    device: str = "cpu",
+    precision: Precision = "complex128",
+    return_density_matrices: bool = False,
+) -> dict[str, Any]:
+    """Validate and size a deterministic continuous-time Lindblad evolution.
+
+    Hamiltonian terms and observables use Pauli descriptors such as
+    ``{"pauli": "X", "coefficient": 0.5, "wires": [0]}``. The initial
+    state may be a basis bitstring such as ``"1"`` or a dense statevector or
+    density matrix. Collapse entries name ``"amplitude_damping"`` (or
+    ``"sigma_minus"``), a non-negative physical rate, and one wire. Rates,
+    Hamiltonian coefficients and time values share one inverse-time unit;
+    rates are not per-instruction probabilities. Times must be finite and
+    strictly increasing.
+
+    This tool validates only and performs no evolution. It runs locally on CPU
+    with no network, credentials, provider or hardware access.
+
+    Returns:
+        Matrix dimension, trajectory memory, time-point count, numerical
+        method, order, integration step size, precision and local provenance.
+    """
+    return plan_evolution(
+        hamiltonian,
+        initial_state,
+        n_wires,
+        times,
+        collapse_operators,
+        observables,
+        device=device,
+        precision=precision,
+        return_density_matrices=return_density_matrices,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def evolve_dynamics_tool(
+    hamiltonian: Sequence[Mapping[str, Any]],
+    initial_state: Any,
+    n_wires: int,
+    times: Sequence[float],
+    collapse_operators: Sequence[Mapping[str, Any]],
+    observables: Sequence[Mapping[str, Any]] | None = None,
+    device: str = "cpu",
+    precision: Precision = "complex128",
+    return_density_matrices: bool = False,
+) -> dict[str, Any]:
+    """Return a time-resolved local Lindblad density-matrix trajectory.
+
+    Uses the same contract as ``plan_evolution_tool``. The response has exactly
+    one population row per requested time, requested observable trajectories,
+    optional density matrices, maximum trace drift, a population-bound check,
+    and honest numerical method/order/step-size/precision metadata. Execution
+    is deterministic and local to this CPU process; it never contacts hardware
+    or a provider.
+    """
+    return evolve_dynamics(
+        hamiltonian,
+        initial_state,
+        n_wires,
+        times,
+        collapse_operators,
+        observables,
+        device=device,
+        precision=precision,
+        return_density_matrices=return_density_matrices,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)

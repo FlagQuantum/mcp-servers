@@ -283,14 +283,11 @@ def _ir_from_qir(decoded: Any) -> Any:
     most likely malformation is a caller reusing the key names from our own IR
     schema (``opcode``/``wires`` instead of ``name``/``index``).
 
-    The finished circuit is round-tripped through ``CircuitIR.from_dict``
-    because ``Circuit.from_qir`` takes parameter values literally: a
-    ``{"$parameter": ...}`` marker handed to it is stored as a plain dict rather
-    than decoded into a ``Parameter``. The circuit then reports no parameters
-    while serialization echoes the marker back, so ``inspect_parameters_tool``
-    and ``serialize_circuit_tool`` contradict each other. Re-decoding is what
-    its own serializer produced restores the symbol, and costs nothing for a
-    circuit that carries no marker.
+    Parameter markers are decoded before construction. Older SDK releases took
+    the marker literally and newer releases correctly reject a dictionary as a
+    rotation angle, so passing the marker through is neither portable nor
+    valid. The finished circuit is still round-tripped through
+    ``CircuitIR.from_dict`` so every QIR path uses the canonical SDK decoder.
     """
     if not isinstance(decoded, Sequence) or isinstance(decoded, (str, bytes)):
         raise ToolInputError(
@@ -305,11 +302,39 @@ def _ir_from_qir(decoded: Any) -> Any:
         )
     gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
     sdk = load_sdk()
+    for gate in gates:
+        parameters = gate.get("parameters")
+        if not isinstance(parameters, Mapping):
+            continue
+        gate["parameters"] = {
+            str(name): _decode_qir_parameter(value, sdk) for name, value in parameters.items()
+        }
     try:
         built = sdk.Circuit.from_qir(gates).to_ir()
         return sdk.CircuitIR.from_dict(built.to_dict())
     except (ValueError, TypeError, KeyError) as exc:
         raise ToolInputError(f"Gate list could not be built into a circuit: {exc}") from exc
+
+
+def _decode_qir_parameter(value: Any, sdk: Any) -> Any:
+    """Decode the symbolic subset of the SDK's public IR value algebra."""
+
+    if not isinstance(value, Mapping):
+        return value
+    if set(value) == {"$parameter"}:
+        return sdk.Parameter(str(value["$parameter"]))
+    if set(value) == {"$expression"}:
+        expression = value["$expression"]
+        if not isinstance(expression, Mapping):
+            return value
+        args = expression.get("args")
+        if not isinstance(args, Sequence) or isinstance(args, (str, bytes)):
+            return value
+        return sdk.ParameterExpression(
+            str(expression.get("op")),
+            tuple(_decode_qir_parameter(item, sdk) for item in args),
+        )
+    return value
 
 
 def _validate_gate(gate: Any, position: int) -> dict[str, Any]:

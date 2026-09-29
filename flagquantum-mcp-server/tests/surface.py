@@ -32,6 +32,8 @@ EXPECTED_TOOLS = frozenset(
         "emit_qcis_tool",
         "plan_execution_tool",
         "simulate_circuit_tool",
+        "plan_evolution_tool",
+        "evolve_dynamics_tool",
         "describe_gate_set_tool",
         "inspect_parameters_tool",
         "bind_parameters_tool",
