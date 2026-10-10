@@ -29,6 +29,7 @@ from flagquantum_mcp_server.circuits import (
 )
 from flagquantum_mcp_server.compilation import (
     compare_topologies,
+    compile_circuit,
     optimize_circuit,
     route_circuit,
 )
@@ -56,8 +57,8 @@ A typical session:
    serialize_circuit_tool (circuit_format="qir"), or bring an existing
    circuit in FlagQuantum IR JSON (circuit_format="ir").
 2. Call analyze_circuit_tool to see gate counts and depth.
-3. Call optimize_circuit_tool, then route_circuit_tool or
-   compare_topologies_tool if the circuit must respect a connectivity limit.
+3. Call compile_circuit_tool to optimize and optionally route in one pass, or
+   compare_topologies_tool first when the connectivity has not been chosen.
 4. Call emit_openqasm_tool or emit_qcis_tool to export the result.
 5. Call plan_execution_tool to see how the SDK would execute it, then
    simulate_circuit_tool to run it locally and get counts, samples,
@@ -198,6 +199,54 @@ def optimize_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") ->
         The optimized IR, a before/after analysis, and instruction_delta.
     """
     return optimize_circuit(circuit, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def compile_circuit_tool(
+    circuit: str,
+    circuit_format: CircuitFormat = "ir",
+    topology: str = "none",
+    rows: int | None = None,
+    cols: int | None = None,
+    edges: Sequence[Sequence[int]] | None = None,
+    routing_strategy: str = "restore_after_each_gate",
+    optimize: bool = True,
+) -> dict[str, Any]:
+    """Compile and optionally route a circuit through the complete SDK pipeline.
+
+    Use this when the desired result is one deployable circuit rather than a
+    topology comparison. With topology="none" the SDK only performs
+    target-independent compilation. Choose line, ring, grid or custom to make
+    every two-qubit gate legal on that connectivity in the same call.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'.
+            With circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not
+            accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+        topology: "none", "line", "ring", "grid" or "custom".
+        rows: Grid rows; provide together with cols, or omit both to derive them.
+        cols: Grid columns; see rows.
+        edges: Explicit wire pairs required by topology="custom".
+        routing_strategy: "restore_after_each_gate" or "persistent_layout".
+        optimize: Run target-independent optimization before routing.
+
+    Returns:
+        Canonical compiled IR, before/after analysis, executed stages and the
+        resolved topology. No hardware is contacted and no credentials are read.
+    """
+    return compile_circuit(
+        circuit,
+        circuit_format,
+        topology=topology,
+        rows=rows,
+        cols=cols,
+        edges=edges,
+        routing_strategy=routing_strategy,
+        optimize=optimize,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)

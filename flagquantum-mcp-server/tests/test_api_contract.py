@@ -41,7 +41,7 @@ TIER1_FROZEN = (
 )
 
 # Tier 2: public module with an explicit __all__, not in the frozen snapshot.
-TIER2_COMPILER = ("CouplingMap", "optimize", "route_to_topology")
+TIER2_COMPILER = ("CouplingMap", "compile", "optimize", "route_to_topology")
 
 # Tier 3: public submodule functions, no __all__.
 TIER3_EMITTERS = (

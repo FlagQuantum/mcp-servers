@@ -24,7 +24,7 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Seventeen tools, over stdio or over Streamable HTTP. Fifteen of them only read
+Eighteen tools, over stdio or over Streamable HTTP. Sixteen of them only read
 the circuit they are given; the other two run it, one to measure it and one to
 improve it.
 
@@ -50,6 +50,7 @@ improve it.
 | Tool | What it answers |
 | --- | --- |
 | `optimize_circuit_tool` | What did target-independent optimization change? |
+| `compile_circuit_tool` | What circuit does the complete optimize-and-route pipeline produce? |
 | `route_circuit_tool` | What does this circuit cost on a line / ring / grid / custom topology? |
 | `compare_topologies_tool` | Which connectivity is cheapest for this circuit? |
 | `describe_topology_tool` | What is the connectivity, and how far apart are two wires? |
