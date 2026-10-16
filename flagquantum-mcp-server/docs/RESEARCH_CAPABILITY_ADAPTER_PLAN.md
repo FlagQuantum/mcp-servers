@@ -137,10 +137,10 @@ evidence validation, schema listing, and exact schema lookup.
 signatures and schema identities. The package dependency remains a released
 version range; a Git URL or commit pin is not acceptable.
 
-The current package range is `flagquantum>=0.3,<0.4`. The published
-`0.3.0rc3` and `0.3.0` wheels do not contain the approved research service API,
-so no compatible range is approved yet. Adapter activation remains blocked
-until a future installed wheel passes the API and process checks.
+The package range is `flagquantum>=0.3.1,<0.4`. Published FlagQuantum 0.3.1
+contains the approved research service API; 0.3.0 and earlier do not. The
+adapter must still pass its installed-wheel API and process checks before its
+separate MCP distribution is published.
 
 ## Existing overlap audit
 

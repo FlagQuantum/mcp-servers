@@ -218,9 +218,9 @@ def test_adapter_invariants_keep_domain_logic_upstream() -> None:
 def test_compatibility_range_matches_the_approved_upstream_release() -> None:
     compatibility = _candidate()["compatibility"]
 
-    assert compatibility["current_package_range"] == "flagquantum>=0.3,<0.4"
-    assert compatibility["released_flagquantum_version"] is None
-    assert compatibility["candidate_range"] is None
+    assert compatibility["current_package_range"] == "flagquantum>=0.3.1,<0.4"
+    assert compatibility["released_flagquantum_version"] == "0.3.1"
+    assert compatibility["candidate_range"] == "flagquantum>=0.3.1,<0.4"
     assert compatibility["version_mismatch_behavior"] == "fail_closed"
 
 
@@ -245,8 +245,8 @@ def test_activation_checker_accepts_only_a_complete_external_ready_state(tmp_pat
     adapter = deepcopy(_candidate())
     adapter["upstream_contract"]["current_status"] = "approved_for_external_adapter"
     adapter["upstream_contract"]["current_maturity"] = "production_supported"
-    adapter["compatibility"]["released_flagquantum_version"] = "0.3.0"
-    adapter["compatibility"]["candidate_range"] = "flagquantum>=0.3,<0.4"
+    adapter["compatibility"]["released_flagquantum_version"] = "0.3.1"
+    adapter["compatibility"]["candidate_range"] = "flagquantum>=0.3.1,<0.4"
     upstream = {
         "status": "approved_for_external_adapter",
         "approval": {
@@ -261,7 +261,7 @@ def test_activation_checker_accepts_only_a_complete_external_ready_state(tmp_pat
     }
     maturity = {"capabilities": {"research_capability_services": {"level": "production_supported"}}}
 
-    wheel = tmp_path / "flagquantum-0.3.0-py3-none-any.whl"
+    wheel = tmp_path / "flagquantum-0.3.1-py3-none-any.whl"
     operations = {tool["upstream_operation"] for tool in adapter["proposed_tools"]}
     operations.update(adapter["upstream_schema_resource_operations"])
     with zipfile.ZipFile(wheel, "w") as archive:
@@ -276,18 +276,18 @@ def test_activation_checker_accepts_only_a_complete_external_ready_state(tmp_pat
             "__all__ = " + repr(tuple(sorted(operations))),
         )
 
-    assert assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", wheel) == []
+    assert assess(adapter, upstream, maturity, "0.3.1", "Decision: approved", wheel) == []
 
-    without_wheel = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved")
+    without_wheel = assess(adapter, upstream, maturity, "0.3.1", "Decision: approved")
     assert "an installed-compatible FlagQuantum wheel was not supplied" in without_wheel
 
-    old_wheel = tmp_path / "flagquantum-0.3.0rc3-py3-none-any.whl"
+    old_wheel = tmp_path / "flagquantum-0.3.0-py3-none-any.whl"
     with zipfile.ZipFile(old_wheel, "w") as archive:
         archive.writestr("flagquantum/services/__init__.py", "__all__ = ()")
-    blockers = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", old_wheel)
+    blockers = assess(adapter, upstream, maturity, "0.3.1", "Decision: approved", old_wheel)
     assert "wheel version does not match the recorded released version" in blockers
-    adapter["compatibility"]["released_flagquantum_version"] = "0.3.0rc3"
-    blockers = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", old_wheel)
+    adapter["compatibility"]["released_flagquantum_version"] = "0.3.0"
+    blockers = assess(adapter, upstream, maturity, "0.3.1", "Decision: approved", old_wheel)
     assert any("wheel omits research service module" in blocker for blocker in blockers)
 
 

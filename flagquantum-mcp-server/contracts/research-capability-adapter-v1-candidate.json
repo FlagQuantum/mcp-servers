@@ -309,9 +309,9 @@
     "provider_backend_execution_estimate": true
   },
   "compatibility": {
-    "current_package_range": "flagquantum>=0.3,<0.4",
-    "released_flagquantum_version": null,
-    "candidate_range": null,
+    "current_package_range": "flagquantum>=0.3.1,<0.4",
+    "released_flagquantum_version": "0.3.1",
+    "candidate_range": "flagquantum>=0.3.1,<0.4",
     "activation_condition": "a published FlagQuantum wheel contains the approved research service API and an adapter wheel is verified against it",
     "version_mismatch_behavior": "fail_closed"
   },

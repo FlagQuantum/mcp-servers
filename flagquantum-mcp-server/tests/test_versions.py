@@ -68,7 +68,7 @@ def test_the_dependency_is_a_version_range_not_a_url() -> None:
     assert block is not None, "no static dependencies table"
     declared = block.group(1)
 
-    assert "flagquantum>=0.3,<0.4" in declared
+    assert "flagquantum>=0.3.1,<0.4" in declared
     assert "git+" not in declared
     assert "http" not in declared
 

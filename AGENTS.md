@@ -96,7 +96,7 @@ has configured a Qiskit MCP server already knows how to configure ours.
    tool may mutate files, environment variables, or global state.
 
 6. **Pin the FlagQuantum contract.** The dependency is a version range
-   (`flagquantum>=0.3,<0.4`), never a git URL or a revision. A dependency
+   (`flagquantum>=0.3.1,<0.4`), never a git URL or a revision. A dependency
    table containing a URL makes every job that installs a different upstream
    revision unresolvable.
 

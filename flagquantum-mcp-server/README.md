@@ -594,7 +594,7 @@ Whether the Hamiltonian reaches the run is decided by
 `tests/test_api_contract.py` pins that default too rather than trusting the
 snapshot to carry it.
 
-The dependency is pinned to `flagquantum>=0.3,<0.4`. It is a version range,
+The dependency is pinned to `flagquantum>=0.3.1,<0.4`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that
 installs a different upstream revision unresolvable.
 
@@ -602,8 +602,8 @@ installs a different upstream revision unresolvable.
 
 [`contracts/sdk-capability-coverage-v1.json`](contracts/sdk-capability-coverage-v1.json)
 records a decision for every production-supported or release-certified
-capability in the pinned post-#632 FlagQuantum source manifest. This source is
-not a published compatible wheel. A decision either
+capability in the pinned post-#632 FlagQuantum source manifest. FlagQuantum
+0.3.1 is the first published compatible core wheel. A decision either
 names this server's bounded tool surface or explains why no tool is exposed.
 The one existing drawing tool is recorded separately as a legacy experimental
 exception; the ledger does not authorize adding other experimental tools.
@@ -613,7 +613,7 @@ eligible capability or MCP tool without a decision fails the check.
 
 This ledger is an **exposure audit**, not a claim that every Python function is
 available over MCP. It does not replace installed-package compatibility tests:
-the current `flagquantum>=0.3,<0.4` dependency is verified separately by the
+the current `flagquantum>=0.3.1,<0.4` dependency is verified separately by the
 test matrix and clean installed-wheel MCP handshake. A source mapping alone
 does not authorize a new tool or prove a future FlagQuantum release works.
 
