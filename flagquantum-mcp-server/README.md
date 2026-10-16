@@ -24,7 +24,7 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Twenty-six tools in this unreleased draft, over stdio or over Streamable HTTP. The research tools use
+Twenty-six tools over stdio or Streamable HTTP. The research tools use
 the installed FlagQuantum service contract directly; the MCP layer does not
 reimplement request decoding, estimation, provider routing or scientific
 validation.
