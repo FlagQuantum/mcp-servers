@@ -10,6 +10,7 @@ from flagquantum_mcp_server.circuits import serialize
 from flagquantum_mcp_server.compilation import (
     build_coupling_map,
     compare_topologies,
+    compile_circuit,
     grid_shape,
     optimize_circuit,
     route_circuit,
@@ -59,6 +60,57 @@ def test_optimize_removes_redundant_gates() -> None:
     assert result["after"]["analysis"]["n_instructions"] < 4
     assert result["instruction_delta"] < 0
     assert result["content_hash_changed"] is True
+
+
+def test_compile_runs_the_complete_pipeline_with_a_topology() -> None:
+    redundant_non_adjacent = json.dumps(
+        [
+            {"name": "h", "index": [0]},
+            {"name": "h", "index": [0]},
+            {"name": "cx", "index": [0, 2]},
+        ]
+    )
+    result = compile_circuit(
+        redundant_non_adjacent,
+        "qir",
+        topology="line",
+        routing_strategy="persistent_layout",
+        optimize=False,
+    )
+
+    assert result["status"] == "success"
+    assert result["transformation"] == "compile"
+    assert result["stages"] == ["route_to_topology"]
+    assert result["routing_strategy"] == "persistent_layout"
+    assert result["topology"]["edges"] == [[0, 1], [1, 2]]
+    assert result["after"]["analysis"]["gate_counts"]["h"] == 2
+    assert result["after"]["analysis"]["gate_counts"]["swap"] > 0
+    assert json.loads(result["ir_json"])["kind"] == "flagquantum.circuit_ir"
+
+
+def test_compile_without_a_topology_only_optimizes() -> None:
+    redundant = json.dumps([{"name": "h", "index": [0]}, {"name": "h", "index": [0]}])
+
+    result = compile_circuit(redundant, "qir")
+
+    assert result["stages"] == ["optimize"]
+    assert result["topology"] is None
+    assert result["instruction_delta"] < 0
+
+
+def test_compile_refuses_topology_fields_it_would_ignore(bell_qir: str) -> None:
+    with pytest.raises(ToolInputError, match="topology='none' cannot use"):
+        compile_circuit(bell_qir, "qir", rows=1, cols=2)
+
+    with pytest.raises(ToolInputError, match="topology='line' cannot use"):
+        compile_circuit(bell_qir, "qir", topology="line", edges=[[0, 1]])
+
+    with pytest.raises(ToolInputError, match="non-default routing_strategy"):
+        compile_circuit(
+            bell_qir,
+            "qir",
+            routing_strategy="persistent_layout",
+        )
 
 
 def test_route_on_a_line_topology_of_the_same_width_is_free(bell_qir: str) -> None:

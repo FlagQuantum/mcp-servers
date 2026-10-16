@@ -15,8 +15,8 @@
     },
     "program_compilation": {
       "disposition": "mapped",
-      "tools": ["optimize_circuit_tool", "route_circuit_tool", "compare_topologies_tool", "describe_layers_tool", "describe_topology_tool", "emit_qcis_tool"],
-      "scope": "Bounded optimization, scheduling and topology routing/comparison, plus QCIS emission; not the full compiler API."
+      "tools": ["optimize_circuit_tool", "compile_circuit_tool", "route_circuit_tool", "compare_topologies_tool", "describe_layers_tool", "describe_topology_tool", "emit_qcis_tool"],
+      "scope": "Bounded optimization, full local compile pipeline, scheduling and topology routing/comparison, plus QCIS emission; not the full compiler API."
     },
     "local_statevector": {
       "disposition": "mapped",
@@ -50,8 +50,9 @@
       "reason": "Distributed tensor-network training requires an explicit safe execution contract before MCP exposure."
     },
     "continuous_time_lindblad": {
-      "disposition": "deferred",
-      "reason": "No bounded MCP input/output and reference-result contract has been approved for this local workflow."
+      "disposition": "mapped",
+      "tools": ["plan_evolution_tool", "evolve_dynamics_tool"],
+      "scope": "Bounded local CPU density-matrix evolution planning and execution on explicit time grids; no remote or hardware execution."
     },
     "circuit_drawing": {
       "disposition": "legacy_experimental",
