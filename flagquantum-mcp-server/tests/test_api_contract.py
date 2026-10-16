@@ -29,6 +29,8 @@ TIER1_FROZEN = (
     "ExecutionPlan",
     "Instruction",
     "IR_VERSION",
+    "Parameter",
+    "ParameterExpression",
     "plan",
     # Named at the call site in training.py, where the SDK's default would
     # otherwise pick the observable and quietly train against <Z0> instead. It is
@@ -56,6 +58,20 @@ TIER3_TRAINING = (
     ("flagquantum.algorithms", "Hamiltonian"),
     ("flagquantum.algorithms", "pauli_term"),
 )
+
+# Tier 3: the approved, production-supported namespace used by the thin
+# research adapter. Domain decoding and scientific validation stay upstream.
+TIER3_RESEARCH = (
+    "describe_research_capability",
+    "describe_research_schema",
+    "estimate_research_capability",
+    "execute_research_capability",
+    "list_research_schemas",
+    "search_research_capabilities",
+    "validate_research_capability_input",
+    "validate_research_evidence",
+)
+
 
 TIER3_DYNAMICS = (
     ("flagquantum.simulation", "EvolutionPlan"),
@@ -154,6 +170,14 @@ def test_training_dependencies_are_still_declared_public(module_path: str, attri
 
     assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
     assert hasattr(module, attribute)
+
+
+@pytest.mark.parametrize("attribute", TIER3_RESEARCH)
+def test_research_service_dependencies_are_still_declared_public(attribute: str) -> None:
+    services = importlib.import_module("flagquantum.services")
+
+    assert attribute in services.__all__, f"flagquantum.services no longer declares {attribute}"
+    assert hasattr(services, attribute)
 
 
 @pytest.mark.parametrize(("module_path", "attribute"), TIER3_DYNAMICS)

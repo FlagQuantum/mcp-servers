@@ -1,4 +1,4 @@
-"""Check explicit MCP coverage decisions against a pinned FlagQuantum release."""
+"""Check explicit MCP coverage decisions against pinned FlagQuantum source."""
 
 from __future__ import annotations
 

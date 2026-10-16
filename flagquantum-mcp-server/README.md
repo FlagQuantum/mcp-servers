@@ -24,9 +24,10 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Eighteen tools, over stdio or over Streamable HTTP. Sixteen of them only read
-the circuit they are given; the other two run it, one to measure it and one to
-improve it.
+Twenty-six tools in this unreleased draft, over stdio or over Streamable HTTP. The research tools use
+the installed FlagQuantum service contract directly; the MCP layer does not
+reimplement request decoding, estimation, provider routing or scientific
+validation.
 
 **Build and inspect**
 
@@ -73,10 +74,23 @@ improve it.
 | `evolve_dynamics_tool` | Time-resolved populations, observables and optional density matrices from local Lindblad evolution |
 | `train_parameters_tool` | The angles that lower a circuit's energy against a Pauli-sum Hamiltonian |
 
-Three resources: `flagquantum://version` (versions of the server, the SDK and
-the IR contract), `flagquantum://gate-set` (every gate with its wire count and
-parameter names) and `flagquantum://ir-schema` (the IR envelope, shown by
-example from a real serialization).
+**Research capability workflow**
+
+| Tool | What it answers |
+| --- | --- |
+| `search_capabilities_tool` | Which approved local research operations match structured filters? |
+| `describe_capability_tool` | What exact request, result, limitations and validators does one operation declare? |
+| `estimate_capability_tool` | Is this request supported locally, and what bounded resources does FlagQuantum estimate? |
+| `validate_capability_input_tool` | Does the complete typed request pass upstream validation? |
+| `execute_local_capability_tool` | What Evidence Bundle results from explicit local provider execution? |
+| `validate_evidence_tool` | Is the returned Evidence Bundle intact and scientifically accepted by the named validator? |
+
+Four concrete resources include `flagquantum://version`,
+`flagquantum://gate-set`, `flagquantum://ir-schema`, and the installed research
+catalog at `flagquantum://capabilities/index`. Two resource templates expose
+exact upstream documents without copying them:
+`flagquantum://capabilities/{capability_id}/{version}` and
+`flagquantum://schemas/{schema_id}`.
 
 Three prompts: `build_and_analyze_circuit`, `compile_for_topology`,
 `export_circuit`.
@@ -580,7 +594,7 @@ Whether the Hamiltonian reaches the run is decided by
 `tests/test_api_contract.py` pins that default too rather than trusting the
 snapshot to carry it.
 
-The dependency is pinned to `flagquantum>=0.3,<0.4`. It is a version range,
+The dependency is pinned to `flagquantum>=0.3.1,<0.4`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that
 installs a different upstream revision unresolvable.
 
@@ -588,7 +602,8 @@ installs a different upstream revision unresolvable.
 
 [`contracts/sdk-capability-coverage-v1.json`](contracts/sdk-capability-coverage-v1.json)
 records a decision for every production-supported or release-certified
-capability in the pinned FlagQuantum v0.3.0 source manifest. A decision either
+capability in the pinned post-#632 FlagQuantum source manifest. FlagQuantum
+0.3.1 is the first published compatible core wheel. A decision either
 names this server's bounded tool surface or explains why no tool is exposed.
 The one existing drawing tool is recorded separately as a legacy experimental
 exception; the ledger does not authorize adding other experimental tools.
@@ -598,12 +613,12 @@ eligible capability or MCP tool without a decision fails the check.
 
 This ledger is an **exposure audit**, not a claim that every Python function is
 available over MCP. It does not replace installed-package compatibility tests:
-the current `flagquantum>=0.3,<0.4` dependency is verified separately by the
+the current `flagquantum>=0.3.1,<0.4` dependency is verified separately by the
 test matrix and clean installed-wheel MCP handshake. A source mapping alone
 does not authorize a new tool or prove a future FlagQuantum release works.
 
 To inspect the pinned source locally, check out commit
-`f0d936b9fe47f0dad1c17d72ac94d596df993a37` of FlagQuantum and run:
+`5c78e1d3b3fad31af5bce9e785ca8a1954229cf7` of FlagQuantum and run:
 
 ```bash
 python tools/check_capability_coverage.py --upstream-root /path/to/FlagQuantum

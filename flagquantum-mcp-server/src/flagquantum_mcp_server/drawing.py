@@ -31,7 +31,7 @@ DRAW_FUNCTION = "draw"
 # The SDK's styles (``available_styles()``) only reach the matplotlib backend,
 # which needs the ``viz`` extra and is therefore not available here. The text
 # drawer's own knobs are what this tool exposes instead.
-TEXT_KWARGS = ("decimals", "max_length", "show_all_wires", "show_initial_state")
+TEXT_KWARGS = ("decimals", "max_length", "show_all_qubits", "show_initial_state")
 
 DEFAULT_LINE_WIDTH = 100
 

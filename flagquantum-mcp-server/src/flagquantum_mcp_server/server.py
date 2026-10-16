@@ -45,6 +45,11 @@ from flagquantum_mcp_server.errors import (
 from flagquantum_mcp_server.gates import gate_records
 from flagquantum_mcp_server.parameters import bind_parameters, inspect_parameters
 from flagquantum_mcp_server.planning import plan_execution
+from flagquantum_mcp_server.research_capabilities import (
+    call_research_operation,
+    research_internal_error,
+    research_invalid_input,
+)
 from flagquantum_mcp_server.simulation import simulate_execution
 from flagquantum_mcp_server.structure import describe_layers, describe_topology
 from flagquantum_mcp_server.training import train_parameters
@@ -76,9 +81,18 @@ every IR payload carries a "version" and a content_hash. Tool results
 report that same field as "ir_version". The hash covers the
 whole payload, metadata included, so two payloads with the same gates but
 different metadata hash differently; see flagquantum://ir-schema.
+
+For the bounded ground-state research workflow, use the six research tools in
+this order: search, describe, estimate, validate input, execute locally, then
+validate evidence. Read the capability and schema resources instead of
+inferring request fields. Research execution is local CPU, credential-free and
+read-only; provider order and unavailable-only fallback must be explicit.
+Transport success is not scientific success: inspect the Evidence Bundle status
+and validators before accepting a result.
 """
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
+_EMPTY_OBJECT: dict[str, Any] = {}
 
 mcp: FastMCP = FastMCP(
     "FlagQuantum",
@@ -104,6 +118,28 @@ def _structured_errors(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[
             return error_payload(SDK_UNAVAILABLE, str(exc))
         except Exception as exc:
             return error_payload(INTERNAL_ERROR, f"{type(exc).__name__}: {exc}")
+
+    return wrapper
+
+
+def _research_errors(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Apply the approved research adapter exception mapping."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        try:
+            return fn(*args, **kwargs)
+        except (KeyError, TypeError, ValueError) as exc:
+            return research_invalid_input(exc)
+        except FlagQuantumUnavailableError as exc:
+            return error_payload(SDK_UNAVAILABLE, str(exc))
+        except (ImportError, ModuleNotFoundError):
+            return error_payload(
+                SDK_UNAVAILABLE,
+                "The installed FlagQuantum SDK is unavailable",
+            )
+        except Exception:
+            return research_internal_error()
 
     return wrapper
 
@@ -884,6 +920,201 @@ def draw_circuit_tool(
         show_all_wires=show_all_wires,
         show_initial_state=show_initial_state,
     )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def search_capabilities_tool(
+    query: dict[str, Any] = _EMPTY_OBJECT,
+) -> dict[str, Any]:
+    """Search the installed structured research capability catalog.
+
+    Start here; an empty query lists the bounded local candidates. This tool
+    discovers capabilities only and does not execute quantum work.
+
+    Args:
+        query: Structured capability filters. Read the returned manifest and
+            schema resources rather than inferring scientific request fields.
+
+    Returns:
+        A success envelope containing the exact installed candidate array, or a
+        structured adapter error.
+    """
+    return call_research_operation("search_research_capabilities", query)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def describe_capability_tool(
+    capability_id: str,
+    version: str | None = None,
+) -> dict[str, Any]:
+    """Describe one exact installed research capability.
+
+    Use the returned request, result, validator, target, limitation and schema
+    identities; do not infer support from this tool description.
+
+    Args:
+        capability_id: Exact ID returned by search_capabilities_tool.
+        version: Optional exact capability version.
+
+    Returns:
+        A success envelope containing the installed manifest, or a structured
+        adapter error.
+    """
+    return call_research_operation(
+        "describe_research_capability",
+        capability_id,
+        version,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def estimate_capability_tool(
+    capability_id: str,
+    request: dict[str, Any],
+    target: str | None = None,
+) -> dict[str, Any]:
+    """Estimate a bounded request with FlagQuantum before execution.
+
+    The upstream estimate is authoritative; this adapter adds no quantum cost
+    model. Stop if the returned estimate is not supported.
+
+    Args:
+        capability_id: Exact installed capability ID.
+        request: Request object conforming to the installed input schema.
+        target: Optional target; the approved slice supports local-cpu only.
+
+    Returns:
+        A success envelope containing the complete upstream estimate, or a
+        structured adapter error.
+    """
+    return call_research_operation(
+        "estimate_research_capability",
+        capability_id,
+        request,
+        target,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def validate_capability_input_tool(
+    capability_id: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate a complete typed research request before execution.
+
+    Continue only when the upstream report passes. MCP transport success is not
+    an applicability decision.
+
+    Args:
+        capability_id: Exact installed capability ID.
+        request: Request object conforming to the installed input schema.
+
+    Returns:
+        A success envelope containing the complete validation report, or a
+        structured adapter error.
+    """
+    return call_research_operation(
+        "validate_research_capability_input",
+        capability_id,
+        request,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def execute_local_capability_tool(
+    capability_id: str,
+    request: dict[str, Any],
+    options: dict[str, Any] = _EMPTY_OBJECT,
+) -> dict[str, Any]:
+    """Execute one validated capability on the bounded local CPU path.
+
+    Pass provider_order exactly and explicitly authorize unavailable-only
+    fallback when requesting more than one provider. This tool never reads
+    credentials, submits hardware or accesses paid resources. Inspect the
+    Evidence Bundle status and validators, then call validate_evidence_tool;
+    transport success is not scientific success.
+
+    Args:
+        capability_id: Exact installed capability ID.
+        request: Request object conforming to the installed input schema.
+        options: Upstream local execution options, including explicit provider
+            order and fallback authorization.
+
+    Returns:
+        A success envelope containing the lossless Evidence Bundle, including
+        route explanation and ordered attempts, or a structured adapter error.
+    """
+    return call_research_operation(
+        "execute_research_capability",
+        capability_id,
+        request,
+        options,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_research_errors
+def validate_evidence_tool(
+    validator_id: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Validate an Evidence Bundle with the installed FlagQuantum validator.
+
+    Preserve this report for independent client or researcher acceptance. The
+    operation does not turn transport completion into a scientific conclusion.
+
+    Args:
+        validator_id: Exact validator capability ID.
+        evidence: Complete Evidence Bundle returned by local execution.
+
+    Returns:
+        A success envelope containing the complete upstream validation report,
+        or a structured adapter error.
+    """
+    return call_research_operation(
+        "validate_research_evidence",
+        validator_id,
+        evidence,
+    )
+
+
+@mcp.resource("flagquantum://capabilities/index", mime_type="application/json")
+def research_capability_index_resource() -> list[Any]:
+    """The installed structured research capability index."""
+    response = call_research_operation("search_research_capabilities")
+    result = response["result"]
+    assert isinstance(result, list)
+    return result
+
+
+@mcp.resource(
+    "flagquantum://capabilities/{capability_id}/{version}",
+    mime_type="application/json",
+)
+def research_capability_resource(capability_id: str, version: str) -> dict[str, Any]:
+    """One exact installed research capability manifest."""
+    response = call_research_operation(
+        "describe_research_capability",
+        capability_id,
+        version,
+    )
+    result = response["result"]
+    assert isinstance(result, dict)
+    return result
+
+
+@mcp.resource("flagquantum://schemas/{schema_id}", mime_type="application/json")
+def research_schema_resource(schema_id: str) -> dict[str, Any]:
+    """One exact installed FlagQuantum research JSON Schema document."""
+    response = call_research_operation("describe_research_schema", schema_id)
+    result = response["result"]
+    assert isinstance(result, dict)
+    return result
 
 
 @mcp.resource("flagquantum://version", mime_type="application/json")

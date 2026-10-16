@@ -70,6 +70,18 @@ STAR4 = [[0, 1], [0, 2], [0, 3]]
 
 Check = Callable[[dict[str, Any]], None]
 
+# These tools are exercised end-to-end, including every published argument, in
+# test_research_capability_tools.py because their results are compared directly
+# with the approved FlagQuantum Services boundary.
+SEPARATELY_WIRED = {
+    "describe_capability_tool",
+    "estimate_capability_tool",
+    "execute_local_capability_tool",
+    "search_capabilities_tool",
+    "validate_capability_input_tool",
+    "validate_evidence_tool",
+}
+
 
 def _connectivity(edges: list[list[int]], kind: str | None = None) -> Check:
     """Build a check that the payload describes exactly this connectivity.
@@ -477,7 +489,8 @@ async def test_no_tool_is_left_out() -> None:
     """A new tool fails here until its wiring is checked too."""
     tools = {tool.name for tool in await mcp.list_tools()}
 
-    assert tools == set(CASES), f"uncovered tools: {sorted(tools - set(CASES))}"
+    covered = set(CASES) | SEPARATELY_WIRED
+    assert tools == covered, f"uncovered tools: {sorted(tools - covered)}"
 
 
 async def test_a_case_passes_only_arguments_the_tool_declares() -> None:

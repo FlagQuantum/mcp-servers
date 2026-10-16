@@ -2,35 +2,57 @@
   "schema": "flagquantum_mcp.sdk_capability_coverage.v1",
   "upstream": {
     "repository": "flagos-ai/FlagQuantum",
-    "release_tag": "v0.3.0",
-    "commit": "f0d936b9fe47f0dad1c17d72ac94d596df993a37",
+    "release_tag": null,
+    "commit": "5c78e1d3b3fad31af5bce9e785ca8a1954229cf7",
     "manifest": "capability-maturity.toml"
   },
   "scope": "Coverage decisions for release-certified and production-supported upstream capabilities. A mapping documents a bounded MCP tool surface, not full parity with every Python API or independent installed-package compatibility evidence.",
   "capabilities": {
     "ir": {
       "disposition": "mapped",
-      "tools": ["analyze_circuit_tool", "serialize_circuit_tool", "deserialize_circuit_tool", "describe_gate_set_tool", "inspect_parameters_tool", "bind_parameters_tool"],
+      "tools": [
+        "analyze_circuit_tool",
+        "serialize_circuit_tool",
+        "deserialize_circuit_tool",
+        "describe_gate_set_tool",
+        "inspect_parameters_tool",
+        "bind_parameters_tool"
+      ],
       "scope": "Circuit IR inspection, serialization, and parameter handling; not every Circuit method."
     },
     "program_compilation": {
       "disposition": "mapped",
-      "tools": ["optimize_circuit_tool", "compile_circuit_tool", "route_circuit_tool", "compare_topologies_tool", "describe_layers_tool", "describe_topology_tool", "emit_qcis_tool"],
+      "tools": [
+        "optimize_circuit_tool",
+        "compile_circuit_tool",
+        "route_circuit_tool",
+        "compare_topologies_tool",
+        "describe_layers_tool",
+        "describe_topology_tool",
+        "emit_qcis_tool"
+      ],
       "scope": "Bounded optimization, full local compile pipeline, scheduling and topology routing/comparison, plus QCIS emission; not the full compiler API."
     },
     "local_statevector": {
       "disposition": "mapped",
-      "tools": ["plan_execution_tool", "simulate_circuit_tool"],
+      "tools": [
+        "plan_execution_tool",
+        "simulate_circuit_tool"
+      ],
       "scope": "Bounded in-process CPU circuit planning and simulation; no remote execution."
     },
     "gradient_methods": {
       "disposition": "mapped",
-      "tools": ["train_parameters_tool"],
+      "tools": [
+        "train_parameters_tool"
+      ],
       "scope": "One bounded local parameter-training workflow; no general gradient or Jacobian tool."
     },
     "openqasm_interchange": {
       "disposition": "mapped",
-      "tools": ["emit_openqasm_tool"],
+      "tools": [
+        "emit_openqasm_tool"
+      ],
       "scope": "OpenQASM emission only; import is not exposed as an MCP tool."
     },
     "sharded_statevector_training": {
@@ -51,13 +73,30 @@
     },
     "continuous_time_lindblad": {
       "disposition": "mapped",
-      "tools": ["plan_evolution_tool", "evolve_dynamics_tool"],
+      "tools": [
+        "plan_evolution_tool",
+        "evolve_dynamics_tool"
+      ],
       "scope": "Bounded local CPU density-matrix evolution planning and execution on explicit time grids; no remote or hardware execution."
     },
     "circuit_drawing": {
       "disposition": "legacy_experimental",
-      "tools": ["draw_circuit_tool"],
+      "tools": [
+        "draw_circuit_tool"
+      ],
       "reason": "Existing drawing tool predates the production-maturity rule. This record does not authorize adding another experimental tool."
+    },
+    "research_capability_services": {
+      "disposition": "mapped",
+      "tools": [
+        "search_capabilities_tool",
+        "describe_capability_tool",
+        "estimate_capability_tool",
+        "validate_capability_input_tool",
+        "execute_local_capability_tool",
+        "validate_evidence_tool"
+      ],
+      "scope": "Approved bounded local research discovery, validation and execution through the public FlagQuantum services contract; staged until a compatible wheel is published."
     }
   }
 }

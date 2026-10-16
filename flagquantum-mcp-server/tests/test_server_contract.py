@@ -14,7 +14,12 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ValidationError
 
 from flagquantum_mcp_server.server import mcp
-from tests.surface import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
+from tests.surface import (
+    EXPECTED_PROMPTS,
+    EXPECTED_RESOURCE_TEMPLATES,
+    EXPECTED_RESOURCES,
+    EXPECTED_TOOLS,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -28,6 +33,12 @@ async def test_every_expected_tool_is_registered() -> None:
     tools = await mcp.list_tools()
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
+
+
+async def test_every_expected_resource_template_is_registered() -> None:
+    templates = await mcp.list_resource_templates()
+
+    assert {template.uri_template for template in templates} == EXPECTED_RESOURCE_TEMPLATES
 
 
 async def test_tools_are_declared_read_only_and_closed_world() -> None:
@@ -51,6 +62,12 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
         "deserialize_circuit_tool",
         "describe_topology_tool",
         "describe_gate_set_tool",
+        "search_capabilities_tool",
+        "describe_capability_tool",
+        "estimate_capability_tool",
+        "validate_capability_input_tool",
+        "execute_local_capability_tool",
+        "validate_evidence_tool",
         "plan_evolution_tool",
         "evolve_dynamics_tool",
     }
@@ -84,6 +101,12 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
                 "deserialize_circuit_tool",
                 "describe_topology_tool",
                 "describe_gate_set_tool",
+                "search_capabilities_tool",
+                "describe_capability_tool",
+                "estimate_capability_tool",
+                "validate_capability_input_tool",
+                "execute_local_capability_tool",
+                "validate_evidence_tool",
                 "plan_evolution_tool",
                 "evolve_dynamics_tool",
             }, name
@@ -202,7 +225,10 @@ async def test_resources_return_parseable_json() -> None:
     for uri in EXPECTED_RESOURCES:
         result = await mcp.read_resource(uri)
         payload = json.loads(result.contents[0].content)
-        assert isinstance(payload, dict)
+        if uri == "flagquantum://capabilities/index":
+            assert isinstance(payload, list)
+        else:
+            assert isinstance(payload, dict)
 
 
 async def test_gate_set_resource_matches_the_sdk() -> None:
@@ -331,17 +357,30 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
     modes = [name.strip() for name in error["message"].split("mode must be one of:")[1].split(",")]
 
     async def probabilities(mode: str) -> list[float]:
+        outputs = (
+            [{"kind": "counts", "wires": [0, 1], "shots": 256}]
+            if mode == "stabilizer"
+            else [{"kind": "probabilities", "wires": [0, 1]}]
+        )
         result = await mcp.call_tool(
             "simulate_circuit_tool",
             {
                 "circuit": bell_qir,
                 "circuit_format": "qir",
-                "options": {"mode": mode},
-                "outputs": [{"kind": "probabilities", "wires": [0, 1]}],
+                "options": {
+                    "mode": mode,
+                    **({"shots": 256} if mode == "stabilizer" else {}),
+                },
+                "outputs": outputs,
             },
         )
         payload = result.structured_content
         assert payload is not None, mode
+        if mode == "stabilizer" and payload["status"] == "error":
+            assert payload["error"]["code"] == "INVALID_INPUT"
+            assert "optional dependency" in payload["error"]["message"]
+            assert "flagquantum[stim]" in payload["error"]["message"]
+            return []
         assert payload["status"] == "success", payload
         execution = payload["execution"]
         # "auto" is a request the SDK resolves, not a name it echoes back:
@@ -359,7 +398,12 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
         assert execution["platform_provider"] == ("pytorch_cpu" if statevector_run else ""), (
             execution
         )
-        return payload["outputs"][0]["value"]
+        value = payload["outputs"][0]["value"]
+        if mode == "stabilizer":
+            assert set(value) <= {"00", "11"}
+            assert sum(value.values()) == 256
+            return []
+        return value
 
     reference = await probabilities("statevector")
 

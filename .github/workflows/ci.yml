@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: flagos-ai/FlagQuantum
-          ref: f0d936b9fe47f0dad1c17d72ac94d596df993a37
+          ref: 5c78e1d3b3fad31af5bce9e785ca8a1954229cf7
           path: upstream-core
           persist-credentials: false
 
