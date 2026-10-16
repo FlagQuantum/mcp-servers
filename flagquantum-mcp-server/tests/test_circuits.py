@@ -531,7 +531,7 @@ def test_ir_still_accepts_a_list_of_wires() -> None:
 
 def test_an_absent_wires_key_is_left_to_the_sdk() -> None:
     """Absent is not the same as null, and the SDK's message for absent is good."""
-    with pytest.raises(ToolInputError, match=r"requires at least one (wire|qubit)"):
+    with pytest.raises(ToolInputError, match="requires at least one qubit"):
         resolve_ir(_with_instruction({"opcode": "h", "params": {}}), IR_FORMAT)
 
 

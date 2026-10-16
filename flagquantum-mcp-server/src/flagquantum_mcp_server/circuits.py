@@ -44,14 +44,12 @@ IR_KIND = "flagquantum.circuit_ir"
 CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 
 # The parameter encodings the SDK's own decoder understands. A value mapping
-# that carries one of these keys becomes a live ``Parameter`` or
-# ``ParameterExpression``. FlagQuantum 0.3 rejects complex and tensor gate
-# angles at construction, so they are not accepted by this gate-list boundary.
-# A mapping that carries neither symbolic key is kept as an opaque dict. That
-# silent fall-through is how a
+# that carries one of these keys becomes a live ``Parameter``,
+# ``ParameterExpression``, ``complex`` or tensor; a mapping that carries none of
+# them is kept as an opaque dict instead. That silent fall-through is how a
 # misspelled marker turns a parameterized circuit into one that reports "no
 # parameters", so the input boundary rejects it rather than passing it on.
-VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression")
+VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression", "$complex", "$tensor")
 
 # The key a gate's arbitrary unitary travels under, which differs by format:
 # the qir reader and the Python API call it ``gate``, and serialized IR calls it
@@ -285,14 +283,11 @@ def _ir_from_qir(decoded: Any) -> Any:
     most likely malformation is a caller reusing the key names from our own IR
     schema (``opcode``/``wires`` instead of ``name``/``index``).
 
-    The finished circuit is round-tripped through ``CircuitIR.from_dict``
-    because ``Circuit.from_qir`` takes parameter values literally: a
-    ``{"$parameter": ...}`` marker handed to it is stored as a plain dict rather
-    than decoded into a ``Parameter``. The circuit then reports no parameters
-    while serialization echoes the marker back, so ``inspect_parameters_tool``
-    and ``serialize_circuit_tool`` contradict each other. Re-decoding is what
-    its own serializer produced restores the symbol, and costs nothing for a
-    circuit that carries no marker.
+    Parameter markers are decoded before construction. Older SDK releases took
+    the marker literally and newer releases correctly reject a dictionary as a
+    rotation angle, so passing the marker through is neither portable nor
+    valid. The finished circuit is still round-tripped through
+    ``CircuitIR.from_dict`` so every QIR path uses the canonical SDK decoder.
     """
     if not isinstance(decoded, Sequence) or isinstance(decoded, (str, bytes)):
         raise ToolInputError(
@@ -305,14 +300,14 @@ def _ir_from_qir(decoded: Any) -> Any:
             "A gate list cannot be empty: the wire count is inferred from the "
             "highest index in the list, so an empty list describes no circuit."
         )
-    sdk = load_sdk()
     gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
+    sdk = load_sdk()
     for gate in gates:
         parameters = gate.get("parameters")
         if not isinstance(parameters, Mapping):
             continue
         gate["parameters"] = {
-            name: _decode_parameter_value(value, sdk) for name, value in parameters.items()
+            str(name): _decode_qir_parameter(value, sdk) for name, value in parameters.items()
         }
     try:
         built = sdk.Circuit.from_qir(gates).to_ir()
@@ -321,21 +316,23 @@ def _ir_from_qir(decoded: Any) -> Any:
         raise ToolInputError(f"Gate list could not be built into a circuit: {exc}") from exc
 
 
-def _decode_parameter_value(value: Any, sdk: Any) -> Any:
-    """Decode the two symbolic angle encodings accepted by FlagQuantum 0.3."""
+def _decode_qir_parameter(value: Any, sdk: Any) -> Any:
+    """Decode the symbolic subset of the SDK's public IR value algebra."""
 
     if not isinstance(value, Mapping):
         return value
-    if "$parameter" in value:
-        return sdk.Parameter(value["$parameter"])
-    if "$expression" in value:
+    if set(value) == {"$parameter"}:
+        return sdk.Parameter(str(value["$parameter"]))
+    if set(value) == {"$expression"}:
         expression = value["$expression"]
-        assert isinstance(expression, Mapping)
-        args = expression["args"]
-        assert isinstance(args, list)
+        if not isinstance(expression, Mapping):
+            return value
+        args = expression.get("args")
+        if not isinstance(args, Sequence) or isinstance(args, (str, bytes)):
+            return value
         return sdk.ParameterExpression(
-            expression["op"],
-            tuple(_decode_parameter_value(argument, sdk) for argument in args),
+            str(expression.get("op")),
+            tuple(_decode_qir_parameter(item, sdk) for item in args),
         )
     return value
 

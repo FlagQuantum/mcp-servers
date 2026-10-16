@@ -43,7 +43,7 @@ TIER1_FROZEN = (
 )
 
 # Tier 2: public module with an explicit __all__, not in the frozen snapshot.
-TIER2_COMPILER = ("CouplingMap", "optimize", "route_to_topology")
+TIER2_COMPILER = ("CouplingMap", "compile", "optimize", "route_to_topology")
 
 # Tier 3: public submodule functions, no __all__.
 TIER3_EMITTERS = (
@@ -70,6 +70,15 @@ TIER3_RESEARCH = (
     "search_research_capabilities",
     "validate_research_capability_input",
     "validate_research_evidence",
+)
+
+
+TIER3_DYNAMICS = (
+    ("flagquantum.simulation", "EvolutionPlan"),
+    ("flagquantum.simulation", "EvolutionResult"),
+    ("flagquantum.simulation", "EvolutionValidationError"),
+    ("flagquantum.simulation", "evolve_density_matrix"),
+    ("flagquantum.simulation", "plan_density_matrix_evolution"),
 )
 
 # The analysis fields this server reports. Extra fields are fine; these are the
@@ -169,6 +178,14 @@ def test_research_service_dependencies_are_still_declared_public(attribute: str)
 
     assert attribute in services.__all__, f"flagquantum.services no longer declares {attribute}"
     assert hasattr(services, attribute)
+
+
+@pytest.mark.parametrize(("module_path", "attribute"), TIER3_DYNAMICS)
+def test_dynamics_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
+    module = importlib.import_module(module_path)
+
+    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
+    assert hasattr(module, attribute)
 
 
 def test_the_policy_that_makes_a_hamiltonian_reach_the_objective_still_exists() -> None:

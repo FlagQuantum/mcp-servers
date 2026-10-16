@@ -24,7 +24,7 @@ the PyPI package. Removing it breaks registry publishing.
 
 ## What it does
 
-Twenty-three tools, over stdio or over Streamable HTTP. The research tools use
+Twenty-six tools in this unreleased draft, over stdio or over Streamable HTTP. The research tools use
 the installed FlagQuantum service contract directly; the MCP layer does not
 reimplement request decoding, estimation, provider routing or scientific
 validation.
@@ -51,6 +51,7 @@ validation.
 | Tool | What it answers |
 | --- | --- |
 | `optimize_circuit_tool` | What did target-independent optimization change? |
+| `compile_circuit_tool` | What circuit does the complete optimize-and-route pipeline produce? |
 | `route_circuit_tool` | What does this circuit cost on a line / ring / grid / custom topology? |
 | `compare_topologies_tool` | Which connectivity is cheapest for this circuit? |
 | `describe_topology_tool` | What is the connectivity, and how far apart are two wires? |
@@ -63,12 +64,14 @@ validation.
 | `emit_qcis_tool` | QCIS text |
 | `draw_circuit_tool` | An ASCII diagram of the circuit |
 | `plan_execution_tool` | How would the SDK execute this — which mode, device, how much memory? |
+| `plan_evolution_tool` | Validate and size a continuous-time Lindblad evolution without running it |
 
 **Run**
 
 | Tool | What it answers |
 | --- | --- |
 | `simulate_circuit_tool` | Counts, samples, marginal probabilities or an expectation value from a local statevector run |
+| `evolve_dynamics_tool` | Time-resolved populations, observables and optional density matrices from local Lindblad evolution |
 | `train_parameters_tool` | The angles that lower a circuit's energy against a Pauli-sum Hamiltonian |
 
 **Research capability workflow**
@@ -420,8 +423,9 @@ failed call leaves the session usable for the next one, which
   release 0.2.0 ships no remote-submission entry point, and this adapter adds
   none. The HTTP transport opens a listening socket and changes nothing about
   what a tool may do once a request arrives.
-- **No noise models.** A `NoiseModel` is a live SDK object rather than a
-  serializable value, and every tool here takes and returns JSON.
+- **No instruction-level `NoiseModel` objects.** Those are live SDK objects
+  rather than serializable values. Continuous-time evolution instead accepts
+  closed JSON collapse-operator descriptors with physical rates.
 - **No in-tree coupling.** This package must never be imported by the
   FlagQuantum repository. That project's long-horizon architecture contract
   names "the main repository has no production MCP transport dependency" as a
@@ -430,6 +434,15 @@ failed call leaves the session usable for the next one, which
   gateway out of tree is what that contract asks for.
 
 ## What it runs, and what that does not prove
+
+`plan_evolution_tool` and `evolve_dynamics_tool` use a separate continuous-time
+contract. A Hamiltonian and observables are Pauli-term lists, the initial state
+is a basis bitstring or dense state, times are explicit and strictly increasing,
+and amplitude damping is a physical rate in the Lindblad equation—not a channel
+probability. The execution tool returns one population row per requested time,
+trace drift, a bounded-population check, and numerical method/order/step-size/
+precision provenance. Both tools are deterministic, local CPU operations with
+no provider, credentials, hardware, or outbound network access.
 
 `simulate_circuit_tool` executes circuits in this process: a statevector
 simulation on CPU. That is the whole of it — no remote target, no provider, no
@@ -581,10 +594,35 @@ Whether the Hamiltonian reaches the run is decided by
 `tests/test_api_contract.py` pins that default too rather than trusting the
 snapshot to carry it.
 
-The current dependency remains `flagquantum>=0.2,<0.3`. The research adapter
-cannot be released until a published FlagQuantum wheel contains its service API
-and a clean installed-wheel check establishes a compatible version range.
-Dependencies use released version ranges, never git URLs.
+The dependency is pinned to `flagquantum>=0.3,<0.4`. It is a version range,
+never a git URL: a URL in the dependency table makes every environment that
+installs a different upstream revision unresolvable.
+
+### Capability coverage decisions
+
+[`contracts/sdk-capability-coverage-v1.json`](contracts/sdk-capability-coverage-v1.json)
+records a decision for every production-supported or release-certified
+capability in the pinned post-#632 FlagQuantum source manifest. This source is
+not a published compatible wheel. A decision either
+names this server's bounded tool surface or explains why no tool is exposed.
+The one existing drawing tool is recorded separately as a legacy experimental
+exception; the ledger does not authorize adding other experimental tools.
+The CI checker compares these decisions to the pinned upstream
+`capability-maturity.toml` and to the server's declared tool surface. A new
+eligible capability or MCP tool without a decision fails the check.
+
+This ledger is an **exposure audit**, not a claim that every Python function is
+available over MCP. It does not replace installed-package compatibility tests:
+the current `flagquantum>=0.3,<0.4` dependency is verified separately by the
+test matrix and clean installed-wheel MCP handshake. A source mapping alone
+does not authorize a new tool or prove a future FlagQuantum release works.
+
+To inspect the pinned source locally, check out commit
+`5c78e1d3b3fad31af5bce9e785ca8a1954229cf7` of FlagQuantum and run:
+
+```bash
+python tools/check_capability_coverage.py --upstream-root /path/to/FlagQuantum
+```
 
 ## Development
 

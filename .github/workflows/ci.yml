@@ -17,9 +17,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/checkout@v7
+        with:
+          repository: flagos-ai/FlagQuantum
+          ref: 5c78e1d3b3fad31af5bce9e785ca8a1954229cf7
+          path: upstream-core
+          persist-credentials: false
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+
+      - name: Check pinned SDK capability coverage
+        run: >-
+          python flagquantum-mcp-server/tools/check_capability_coverage.py
+          --upstream-root upstream-core
 
       - name: Install
         working-directory: flagquantum-mcp-server

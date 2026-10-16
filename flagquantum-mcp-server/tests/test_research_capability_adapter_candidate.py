@@ -218,7 +218,7 @@ def test_adapter_invariants_keep_domain_logic_upstream() -> None:
 def test_compatibility_range_matches_the_approved_upstream_release() -> None:
     compatibility = _candidate()["compatibility"]
 
-    assert compatibility["current_package_range"] == "flagquantum>=0.2,<0.3"
+    assert compatibility["current_package_range"] == "flagquantum>=0.3,<0.4"
     assert compatibility["released_flagquantum_version"] is None
     assert compatibility["candidate_range"] is None
     assert compatibility["version_mismatch_behavior"] == "fail_closed"

@@ -68,6 +68,8 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
         "validate_capability_input_tool",
         "execute_local_capability_tool",
         "validate_evidence_tool",
+        "plan_evolution_tool",
+        "evolve_dynamics_tool",
     }
 
     for name, tool in tools.items():
@@ -105,6 +107,8 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
                 "validate_capability_input_tool",
                 "execute_local_capability_tool",
                 "validate_evidence_tool",
+                "plan_evolution_tool",
+                "evolve_dynamics_tool",
             }, name
             continue
         schema = properties["circuit_format"]
@@ -309,7 +313,7 @@ async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, p
 
 
 async def test_every_execution_mode_the_description_names_actually_runs(bell_qir: str) -> None:
-    """Every dependency-free engine runs; the optional engine fails explicitly.
+    """The default-install engines run; the optional one has a clear boundary.
 
     Naming an engine is a promise about what the tool accepts, and nothing else
     in the suite reads the mode list: a mode can stop being accepted upstream,
@@ -334,7 +338,7 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
     # appeared in the provenance sentence. Splitting on the offer's own wording
     # is what closes that, and requiring the marker makes a reword fail loudly
     # instead of silently widening the window to the whole text.
-    offer = description.split("All five dependency-free modes are reachable")
+    offer = description.split("and all five default-install engines are reachable")
     assert len(offer) == 2, "the description no longer offers the modes in one place"
     offered = set(re.findall(r'"([a-z_]+)"', offer[1].split(";", 1)[0]))
 
@@ -411,15 +415,32 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
         "statevector",
         "tensor_network",
     }
-    dependency_free = set(modes) - {"stabilizer"}
-    assert dependency_free <= offered, (
-        f"the offer does not name {sorted(dependency_free - offered)}"
+    assert set(modes) - {"stabilizer"} <= offered, (
+        f"the offer omits {sorted(set(modes) - offered - {'stabilizer'})}"
     )
-    assert '"stabilizer"' in description
     for mode in modes:
-        observed = await probabilities(mode)
-        if mode != "stabilizer":
-            assert observed == pytest.approx(reference, abs=1e-6), mode
+        if mode == "stabilizer":
+            result = await mcp.call_tool(
+                "simulate_circuit_tool",
+                {
+                    "circuit": bell_qir,
+                    "circuit_format": "qir",
+                    "options": {"mode": mode, "shots": 256, "seed": 7},
+                    "outputs": [{"kind": "counts", "wires": [0, 1]}],
+                },
+            )
+            payload = result.structured_content
+            assert payload is not None
+            if payload["status"] == "error":
+                assert payload["error"]["code"] == "INVALID_INPUT", payload
+                assert "flagquantum[stim]" in payload["error"]["message"], payload
+                continue
+            assert payload["status"] == "success", payload
+            counts = payload["outputs"][0]["value"][0]
+            assert sum(counts.values()) == 256
+            assert set(counts) <= {"00", "11"}
+            continue
+        assert await probabilities(mode) == pytest.approx(reference, abs=1e-6), mode
 
 
 async def test_no_tool_hides_its_only_documentation_in_a_returns_section() -> None:

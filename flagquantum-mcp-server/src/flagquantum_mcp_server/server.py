@@ -29,10 +29,12 @@ from flagquantum_mcp_server.circuits import (
 )
 from flagquantum_mcp_server.compilation import (
     compare_topologies,
+    compile_circuit,
     optimize_circuit,
     route_circuit,
 )
 from flagquantum_mcp_server.drawing import draw_circuit
+from flagquantum_mcp_server.dynamics import Precision, evolve_dynamics, plan_evolution
 from flagquantum_mcp_server.emission import emit_openqasm, emit_qcis
 from flagquantum_mcp_server.errors import (
     INTERNAL_ERROR,
@@ -61,12 +63,17 @@ A typical session:
    serialize_circuit_tool (circuit_format="qir"), or bring an existing
    circuit in FlagQuantum IR JSON (circuit_format="ir").
 2. Call analyze_circuit_tool to see gate counts and depth.
-3. Call optimize_circuit_tool, then route_circuit_tool or
-   compare_topologies_tool if the circuit must respect a connectivity limit.
+3. Call compile_circuit_tool to optimize and optionally route in one pass, or
+   compare_topologies_tool first when the connectivity has not been chosen.
 4. Call emit_openqasm_tool or emit_qcis_tool to export the result.
 5. Call plan_execution_tool to see how the SDK would execute it, then
    simulate_circuit_tool to run it locally and get counts, samples,
    probabilities or an expectation value.
+
+For driven open-system dynamics, use plan_evolution_tool and
+evolve_dynamics_tool. They take an explicit time grid and physical Lindblad
+rates; those rates are not instruction-level channel probabilities. Both run
+locally on CPU without a provider, credentials, hardware or network access.
 
 Read the flagquantum://gate-set resource for the available gate names and
 flagquantum://ir-schema for the IR envelope. IR JSON is the canonical format;
@@ -234,6 +241,54 @@ def optimize_circuit_tool(circuit: str, circuit_format: CircuitFormat = "ir") ->
         The optimized IR, a before/after analysis, and instruction_delta.
     """
     return optimize_circuit(circuit, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def compile_circuit_tool(
+    circuit: str,
+    circuit_format: CircuitFormat = "ir",
+    topology: str = "none",
+    rows: int | None = None,
+    cols: int | None = None,
+    edges: Sequence[Sequence[int]] | None = None,
+    routing_strategy: str = "restore_after_each_gate",
+    optimize: bool = True,
+) -> dict[str, Any]:
+    """Compile and optionally route a circuit through the complete SDK pipeline.
+
+    Use this when the desired result is one deployable circuit rather than a
+    topology comparison. With topology="none" the SDK only performs
+    target-independent compilation. Choose line, ring, grid or custom to make
+    every two-qubit gate legal on that connectivity in the same call.
+
+    Args:
+        circuit: Circuit payload. With circuit_format="qir" pass a gate list such as
+            '[{"name": "h", "index": [0]}, {"name": "cx", "index": [0, 1]}]'.
+            With circuit_format="ir" pass FlagQuantum IR JSON. OpenQASM is not
+            accepted.
+        circuit_format: "ir" for FlagQuantum IR JSON, "qir" for a gate list.
+        topology: "none", "line", "ring", "grid" or "custom".
+        rows: Grid rows; provide together with cols, or omit both to derive them.
+        cols: Grid columns; see rows.
+        edges: Explicit wire pairs required by topology="custom".
+        routing_strategy: "restore_after_each_gate" or "persistent_layout".
+        optimize: Run target-independent optimization before routing.
+
+    Returns:
+        Canonical compiled IR, before/after analysis, executed stages and the
+        resolved topology. No hardware is contacted and no credentials are read.
+    """
+    return compile_circuit(
+        circuit,
+        circuit_format,
+        topology=topology,
+        rows=rows,
+        cols=cols,
+        edges=edges,
+        routing_strategy=routing_strategy,
+        optimize=optimize,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -451,10 +506,11 @@ def simulate_circuit_tool(
 
     This is the only tool here that executes anything, and it executes in this
     process on CPU: no network, no credentials, no provider. The engine is
-    chosen by options["mode"]. All five dependency-free modes are reachable —
-    "statevector" (the default), "mps", "tensor_network", "density_matrix" and
-    "auto". The SDK also names "stabilizer", which requires its optional
-    `flagquantum[stim]` dependency. They are engines
+    chosen by options["mode"], and all five default-install engines are reachable —
+    "statevector" (the default), "mps", "tensor_network", "density_matrix"
+    and "auto". The SDK also accepts "stabilizer", which requires the optional
+    `flagquantum[stim]` dependency and supports shot-based counts or samples,
+    not exact probabilities. These are engines
     of one local run rather than different places to run, so none of them
     leaves this process — but they are not interchangeable in cost, and the
     spread is wider than the circuit's width suggests. Measured at 20 wires on
@@ -468,8 +524,7 @@ def simulate_circuit_tool(
     the SDK settled on — "statevector", since this tool passes no noise model —
     rather than as the word "auto". "execution_path" and "platform_provider"
     read "local_statevector" and "pytorch_cpu" for a statevector run and are
-    empty strings for "mps", "tensor_network", "density_matrix" and
-    "stabilizer", which is
+    empty strings for "mps", "tensor_network", "density_matrix" and "stabilizer", which is
     how the SDK reports those engines rather than a failure.
 
     What is returned, in order of precedence: the outputs you pass; otherwise
@@ -512,6 +567,85 @@ def simulate_circuit_tool(
         contract that records a local run as not measured.
     """
     return simulate_execution(circuit, circuit_format, options=options, outputs=outputs)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def plan_evolution_tool(
+    hamiltonian: Sequence[Mapping[str, Any]],
+    initial_state: Any,
+    n_wires: int,
+    times: Sequence[float],
+    collapse_operators: Sequence[Mapping[str, Any]],
+    observables: Sequence[Mapping[str, Any]] | None = None,
+    device: str = "cpu",
+    precision: Precision = "complex128",
+    return_density_matrices: bool = False,
+) -> dict[str, Any]:
+    """Validate and size a deterministic continuous-time Lindblad evolution.
+
+    Hamiltonian terms and observables use Pauli descriptors such as
+    ``{"pauli": "X", "coefficient": 0.5, "wires": [0]}``. The initial
+    state may be a basis bitstring such as ``"1"`` or a dense statevector or
+    density matrix. Collapse entries name ``"amplitude_damping"`` (or
+    ``"sigma_minus"``), a non-negative physical rate, and one wire. Rates,
+    Hamiltonian coefficients and time values share one inverse-time unit;
+    rates are not per-instruction probabilities. Times must be finite and
+    strictly increasing.
+
+    This tool validates only and performs no evolution. It runs locally on CPU
+    with no network, credentials, provider or hardware access.
+
+    Returns:
+        Matrix dimension, trajectory memory, time-point count, numerical
+        method, order, integration step size, precision and local provenance.
+    """
+    return plan_evolution(
+        hamiltonian,
+        initial_state,
+        n_wires,
+        times,
+        collapse_operators,
+        observables,
+        device=device,
+        precision=precision,
+        return_density_matrices=return_density_matrices,
+    )
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def evolve_dynamics_tool(
+    hamiltonian: Sequence[Mapping[str, Any]],
+    initial_state: Any,
+    n_wires: int,
+    times: Sequence[float],
+    collapse_operators: Sequence[Mapping[str, Any]],
+    observables: Sequence[Mapping[str, Any]] | None = None,
+    device: str = "cpu",
+    precision: Precision = "complex128",
+    return_density_matrices: bool = False,
+) -> dict[str, Any]:
+    """Return a time-resolved local Lindblad density-matrix trajectory.
+
+    Uses the same contract as ``plan_evolution_tool``. The response has exactly
+    one population row per requested time, requested observable trajectories,
+    optional density matrices, maximum trace drift, a population-bound check,
+    and honest numerical method/order/step-size/precision metadata. Execution
+    is deterministic and local to this CPU process; it never contacts hardware
+    or a provider.
+    """
+    return evolve_dynamics(
+        hamiltonian,
+        initial_state,
+        n_wires,
+        times,
+        collapse_operators,
+        observables,
+        device=device,
+        precision=precision,
+        return_density_matrices=return_density_matrices,
+    )
 
 
 @mcp.tool(annotations=READ_ONLY)

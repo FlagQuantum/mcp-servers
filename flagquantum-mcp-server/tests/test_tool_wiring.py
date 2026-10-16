@@ -124,6 +124,14 @@ def _optimized(payload: dict[str, Any]) -> None:
     assert payload["transformation"] == "optimize"
 
 
+def _compiled(payload: dict[str, Any]) -> None:
+    assert payload["transformation"] == "compile"
+    assert payload["stages"] == ["route_to_topology"]
+    assert payload["routing_strategy"] == "persistent_layout"
+    assert payload["optimize"] is False
+    _connectivity(GRID_2X2)(payload)
+
+
 def _routed_onto_a_ring(payload: dict[str, Any]) -> None:
     _connectivity(RING3)(payload)
     assert payload["strategy"] == "persistent_layout"
@@ -167,6 +175,22 @@ def _simulated(payload: dict[str, Any]) -> None:
     assert counts["wires"] == [0], "outputs.wires must reach the run"
     assert sum(counts["value"][0].values()) == 100
     assert payload["execution"]["execution_path"] == "local_statevector"
+
+
+def _planned_evolution(payload: dict[str, Any]) -> None:
+    assert payload["plan"]["n_times"] == 3
+    assert payload["plan"]["trajectory_bytes"] == 3 * 2 * 2 * 8
+    assert payload["plan"]["numerics"]["precision"] == "complex64"
+    assert payload["execution"]["network_access"] is False
+
+
+def _evolved_dynamics(payload: dict[str, Any]) -> None:
+    assert len(payload["times"]) == 3
+    assert len(payload["populations"]) == 3
+    assert payload["density_matrices"] is not None
+    assert set(payload["observables"]) == {"z"}
+    assert payload["numerics"]["precision"] == "complex64"
+    assert payload["execution"]["deterministic"] is True
 
 
 def _described_two_gates(payload: dict[str, Any]) -> None:
@@ -221,6 +245,29 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
     ],
     "deserialize_circuit_tool": [({"ir_json": CANONICAL_IR, "indent": 2}, _round_tripped)],
     "optimize_circuit_tool": [({"circuit": GHZ, "circuit_format": "qir"}, _optimized)],
+    "compile_circuit_tool": [
+        (
+            {
+                "circuit": GHZ4,
+                "circuit_format": "qir",
+                "topology": "grid",
+                "rows": 2,
+                "cols": 2,
+                "routing_strategy": "persistent_layout",
+                "optimize": False,
+            },
+            _compiled,
+        ),
+        (
+            {
+                "circuit": GHZ4,
+                "circuit_format": "qir",
+                "topology": "custom",
+                "edges": STAR4,
+            },
+            _connectivity(STAR4),
+        ),
+    ],
     "route_circuit_tool": [
         (
             {
@@ -296,6 +343,38 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
                 "outputs": [{"kind": "counts", "wires": [0]}],
             },
             _simulated,
+        )
+    ],
+    "plan_evolution_tool": [
+        (
+            {
+                "hamiltonian": [{"pauli": "X", "coefficient": 0.5, "wires": [0]}],
+                "initial_state": "1",
+                "n_wires": 1,
+                "times": [0.0, 0.05, 0.1],
+                "collapse_operators": [{"operator": "amplitude_damping", "rate": 0.1, "wire": 0}],
+                "observables": [{"name": "z", "pauli": "Z", "wires": [0]}],
+                "device": "cpu",
+                "precision": "complex64",
+                "return_density_matrices": True,
+            },
+            _planned_evolution,
+        )
+    ],
+    "evolve_dynamics_tool": [
+        (
+            {
+                "hamiltonian": [{"pauli": "X", "coefficient": 0.5, "wires": [0]}],
+                "initial_state": "1",
+                "n_wires": 1,
+                "times": [0.0, 0.05, 0.1],
+                "collapse_operators": [{"operator": "amplitude_damping", "rate": 0.1, "wire": 0}],
+                "observables": [{"name": "z", "pauli": "Z", "wires": [0]}],
+                "device": "cpu",
+                "precision": "complex64",
+                "return_density_matrices": True,
+            },
+            _evolved_dynamics,
         )
     ],
     "describe_gate_set_tool": [({"gates": ["rz", "ccx"]}, _described_two_gates)],

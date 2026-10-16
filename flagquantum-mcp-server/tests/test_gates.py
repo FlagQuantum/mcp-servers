@@ -322,17 +322,31 @@ def test_nesting_past_the_bound_is_refused_rather_than_crashing() -> None:
 
 
 def _markers_the_sdk_emits() -> set[str]:
-    """Serialize one circuit per parameter kind, and collect the marker keys."""
+    """Serialize valid angle values and a complex matrix, then collect markers."""
     import flagquantum as fq
 
     values: list[object] = [fq.Parameter("t"), 2 * fq.Parameter("t")]
+    torch = pytest.importorskip("torch", reason="the tensor marker needs torch")
+    values.append(torch.tensor(0.5))
+
+    def collect(value: object, found: set[str]) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key.startswith("$"):
+                    found.add(key)
+                collect(child, found)
+        elif isinstance(value, list):
+            for child in value:
+                collect(child, found)
 
     markers: set[str] = set()
     for value in values:
         ir = fq.Circuit(1).ry(0, value).to_ir().to_dict()
-        for key in ir["instructions"][0]["params"]["theta"]:
-            if key.startswith("$"):
-                markers.add(key)
+        collect(ir["instructions"][0]["params"]["theta"], markers)
+    matrix = torch.tensor([[1 + 0j, 0], [0, 1j]], dtype=torch.complex64)
+    collect(
+        fq.Circuit(1).any(0, unitary=matrix).to_ir().to_dict()["instructions"][0]["matrix"], markers
+    )
     return markers
 
 
@@ -348,6 +362,18 @@ def test_the_accepted_markers_are_exactly_the_ones_the_sdk_emits() -> None:
 def test_every_marker_the_sdk_emits_is_accepted_here() -> None:
     """The failure this prevents: validation refusing a circuit the SDK built."""
     for marker in _markers_the_sdk_emits():
+        if marker in {"$complex", "$tensor"}:
+            import flagquantum as fq
+
+            torch = pytest.importorskip("torch")
+            if marker == "$complex":
+                matrix = torch.tensor([[1 + 0j, 0], [0, 1j]], dtype=torch.complex64)
+                ir = resolve_ir(fq.Circuit(1).any(0, unitary=matrix).to_ir().to_dict())
+                assert ir.instructions[0].matrix is not None
+            else:
+                ir = resolve_ir(fq.Circuit(1).ry(0, torch.tensor(0.5)).to_ir().to_dict())
+                assert ir.instructions[0].params["theta"] is not None
+            continue
         value = {
             "$parameter": {"$parameter": "t"},
             "$expression": {"$expression": {"op": "mul", "args": [2, {"$parameter": "t"}]}},

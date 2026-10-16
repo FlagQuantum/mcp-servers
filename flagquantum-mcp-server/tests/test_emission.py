@@ -125,18 +125,18 @@ def _complex_angled_ir() -> str:
     )
 
 
-def test_openqasm_reports_an_inexpressible_value_as_an_input_error() -> None:
-    with pytest.raises(ToolInputError, match="carries none of the encodings"):
+def test_openqasm_rejects_a_non_real_angle_at_the_sdk_input_boundary() -> None:
+    with pytest.raises(ToolInputError, match="must be a real number"):
         emit_openqasm(_complex_angled_ir(), "ir")
 
 
-def test_qcis_reports_an_inexpressible_value_as_an_input_error() -> None:
-    with pytest.raises(ToolInputError, match="carries none of the encodings"):
+def test_qcis_rejects_a_non_real_angle_at_the_sdk_input_boundary() -> None:
+    with pytest.raises(ToolInputError, match="must be a real number"):
         emit_qcis(_complex_angled_ir(), "ir")
 
 
-def test_the_refusal_names_the_value_rather_than_raising_bare() -> None:
-    with pytest.raises(ToolInputError, match=r"\{'\$complex': \[1\.0, 0\.0\]\}"):
+def test_the_refusal_names_the_angle_rather_than_raising_bare() -> None:
+    with pytest.raises(ToolInputError, match="parameter 'theta'"):
         emit_openqasm(_complex_angled_ir(), "ir")
 
 
