@@ -1,0 +1,63 @@
+{
+  "schema": "flagquantum_mcp.sdk_capability_coverage.v1",
+  "upstream": {
+    "repository": "flagos-ai/FlagQuantum",
+    "release_tag": "v0.3.0",
+    "commit": "f0d936b9fe47f0dad1c17d72ac94d596df993a37",
+    "manifest": "capability-maturity.toml"
+  },
+  "scope": "Coverage decisions for release-certified and production-supported upstream capabilities. A mapping documents a bounded MCP tool surface, not full parity with every Python API or independent installed-package compatibility evidence.",
+  "capabilities": {
+    "ir": {
+      "disposition": "mapped",
+      "tools": ["analyze_circuit_tool", "serialize_circuit_tool", "deserialize_circuit_tool", "describe_gate_set_tool", "inspect_parameters_tool", "bind_parameters_tool"],
+      "scope": "Circuit IR inspection, serialization, and parameter handling; not every Circuit method."
+    },
+    "program_compilation": {
+      "disposition": "mapped",
+      "tools": ["optimize_circuit_tool", "compile_circuit_tool", "route_circuit_tool", "compare_topologies_tool", "describe_layers_tool", "describe_topology_tool", "emit_qcis_tool"],
+      "scope": "Bounded optimization, full local compile pipeline, scheduling and topology routing/comparison, plus QCIS emission; not the full compiler API."
+    },
+    "local_statevector": {
+      "disposition": "mapped",
+      "tools": ["plan_execution_tool", "simulate_circuit_tool"],
+      "scope": "Bounded in-process CPU circuit planning and simulation; no remote execution."
+    },
+    "gradient_methods": {
+      "disposition": "mapped",
+      "tools": ["train_parameters_tool"],
+      "scope": "One bounded local parameter-training workflow; no general gradient or Jacobian tool."
+    },
+    "openqasm_interchange": {
+      "disposition": "mapped",
+      "tools": ["emit_openqasm_tool"],
+      "scope": "OpenQASM emission only; import is not exposed as an MCP tool."
+    },
+    "sharded_statevector_training": {
+      "disposition": "deferred",
+      "reason": "Distributed training needs process ownership and resources outside this stateless, side-effect-free server."
+    },
+    "two_node_statevector_training": {
+      "disposition": "deferred",
+      "reason": "Multi-node launch and credentials are outside this local MCP server's boundary."
+    },
+    "two_node_mps_training": {
+      "disposition": "deferred",
+      "reason": "Multi-node launch and resource ownership are outside this local MCP server's boundary."
+    },
+    "two_node_tensor_network_training": {
+      "disposition": "deferred",
+      "reason": "Distributed tensor-network training requires an explicit safe execution contract before MCP exposure."
+    },
+    "continuous_time_lindblad": {
+      "disposition": "mapped",
+      "tools": ["plan_evolution_tool", "evolve_dynamics_tool"],
+      "scope": "Bounded local CPU density-matrix evolution planning and execution on explicit time grids; no remote or hardware execution."
+    },
+    "circuit_drawing": {
+      "disposition": "legacy_experimental",
+      "tools": ["draw_circuit_tool"],
+      "reason": "Existing drawing tool predates the production-maturity rule. This record does not authorize adding another experimental tool."
+    }
+  }
+}
