@@ -28,7 +28,7 @@ def _arguments(
     return {
         "hamiltonian": hamiltonian,
         "initial_state": initial_state,
-        "n_wires": n_wires,
+        "n_qubits": n_wires,
         "times": times,
         "collapse_operators": collapse_operators,
         "observables": observables,

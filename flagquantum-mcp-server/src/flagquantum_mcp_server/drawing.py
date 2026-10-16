@@ -78,7 +78,7 @@ def draw_circuit(
                 "text",
                 decimals=decimals,
                 max_length=line_width,
-                show_all_wires=show_all_wires,
+                show_all_qubits=show_all_wires,
                 show_initial_state=show_initial_state,
             )
         )

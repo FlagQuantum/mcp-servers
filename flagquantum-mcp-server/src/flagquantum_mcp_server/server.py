@@ -470,9 +470,11 @@ def simulate_circuit_tool(
 
     This is the only tool here that executes anything, and it executes in this
     process on CPU: no network, no credentials, no provider. The engine is
-    chosen by options["mode"], and all five the SDK offers are reachable —
-    "statevector" (the default), "mps", "tensor_network", "density_matrix" and
-    "auto"; a sixth spelling is refused with the five named. They are engines
+    chosen by options["mode"], and all five default-install engines are reachable —
+    "statevector" (the default), "mps", "tensor_network", "density_matrix"
+    and "auto". The SDK also accepts "stabilizer", which requires the optional
+    `flagquantum[stim]` dependency and supports shot-based counts or samples,
+    not exact probabilities. These are engines
     of one local run rather than different places to run, so none of them
     leaves this process — but they are not interchangeable in cost, and the
     spread is wider than the circuit's width suggests. Measured at 20 wires on
@@ -486,7 +488,7 @@ def simulate_circuit_tool(
     the SDK settled on — "statevector", since this tool passes no noise model —
     rather than as the word "auto". "execution_path" and "platform_provider"
     read "local_statevector" and "pytorch_cpu" for a statevector run and are
-    empty strings for "mps", "tensor_network" and "density_matrix", which is
+    empty strings for "mps", "tensor_network", "density_matrix" and "stabilizer", which is
     how the SDK reports those engines rather than a failure.
 
     What is returned, in order of precedence: the outputs you pass; otherwise

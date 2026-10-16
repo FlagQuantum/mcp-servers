@@ -580,7 +580,7 @@ Whether the Hamiltonian reaches the run is decided by
 `tests/test_api_contract.py` pins that default too rather than trusting the
 snapshot to carry it.
 
-The dependency is pinned to `flagquantum>=0.2,<0.3`. It is a version range,
+The dependency is pinned to `flagquantum>=0.3,<0.4`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that
 installs a different upstream revision unresolvable.
 
