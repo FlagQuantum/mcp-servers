@@ -6,10 +6,12 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import zipfile
 from pathlib import Path
 from typing import Any
 
 from packaging.requirements import Requirement
+from packaging.utils import parse_wheel_filename
 from packaging.version import Version
 
 try:
@@ -65,6 +67,7 @@ def assess_prerequisites(
     maturity: dict[str, Any],
     upstream_version: str,
     approval_record: str,
+    wheel: Path | None = None,
 ) -> list[str]:
     """Return every external blocker; an empty list means activation may begin."""
 
@@ -78,6 +81,63 @@ def assess_prerequisites(
     )
     blockers.extend(_maturity_blockers(expected, adapter_upstream, maturity))
     blockers.extend(_compatibility_blockers(adapter["compatibility"], upstream_version))
+    blockers.extend(
+        _wheel_blockers(
+            wheel,
+            adapter["compatibility"]["released_flagquantum_version"],
+            {tool["upstream_operation"] for tool in adapter["proposed_tools"]}
+            | set(adapter["upstream_schema_resource_operations"]),
+        )
+    )
+    return blockers
+
+
+def _wheel_blockers(
+    wheel: Path | None,
+    released_version: str | None,
+    required_operations: set[str],
+) -> list[str]:
+    if wheel is None:
+        return ["an installed-compatible FlagQuantum wheel was not supplied"]
+    blockers: list[str] = []
+    try:
+        name, version, _, _ = parse_wheel_filename(wheel.name)
+        if name != "flagquantum":
+            blockers.append("wheel distribution is not flagquantum")
+        if released_version is not None and version != Version(released_version):
+            blockers.append("wheel version does not match the recorded released version")
+        with zipfile.ZipFile(wheel) as archive:
+            members = set(archive.namelist())
+            required_modules = {
+                "flagquantum/services/research_capabilities.py",
+                "flagquantum/services/research_execution.py",
+                "flagquantum/services/research_schemas.py",
+                "flagquantum/services/__init__.py",
+            }
+            absent = sorted(required_modules - members)
+            if absent:
+                blockers.extend(f"wheel omits research service module: {name}" for name in absent)
+            if "flagquantum/services/__init__.py" not in members:
+                return blockers
+            module = ast.parse(archive.read("flagquantum/services/__init__.py"))
+    except (OSError, ValueError, zipfile.BadZipFile, SyntaxError) as exc:
+        return [f"wheel cannot be inspected: {exc}"]
+    exports: set[str] = set()
+    for statement in module.body:
+        if isinstance(statement, ast.Assign) and any(
+            isinstance(target, ast.Name) and target.id == "__all__" for target in statement.targets
+        ):
+            try:
+                value = ast.literal_eval(statement.value)
+            except (ValueError, TypeError):
+                return ["wheel public service export list is not a literal"]
+            if isinstance(value, (list, tuple)):
+                exports = {item for item in value if isinstance(item, str)}
+            break
+    blockers.extend(
+        f"wheel omits public research operation: {name}"
+        for name in sorted(required_operations - exports)
+    )
     return blockers
 
 
@@ -157,6 +217,7 @@ def _compatibility_blockers(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--flagquantum-source-root", type=Path, required=True)
+    parser.add_argument("--flagquantum-wheel", type=Path, required=True)
     parser.add_argument(
         "--adapter-contract",
         type=Path,
@@ -184,6 +245,7 @@ def main() -> int:
         maturity,
         _project_version(upstream_root, project),
         approval_record,
+        args.flagquantum_wheel,
     )
     result = {
         "schema": "flagquantum_mcp.research_adapter_activation_readiness.v1",

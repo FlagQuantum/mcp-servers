@@ -192,7 +192,8 @@ The first three gates are executable rather than inferred from prose:
 
 ```bash
 python tools/check_research_adapter_prerequisites.py \
-  --flagquantum-source-root /path/to/released/FlagQuantum/source
+  --flagquantum-source-root /path/to/FlagQuantum/source \
+  --flagquantum-wheel /path/to/published/flagquantum.whl
 ```
 
 The checker reads the upstream candidate contract, approval record,
@@ -200,6 +201,9 @@ The checker reads the upstream candidate contract, approval record,
 contract. It exits non-zero and emits a JSON list of blockers unless the owner
 decisions use the pinned approved state, the record contains `Decision:
 approved`, the maturity is allowed, and the explicitly recorded release and
-compatible range agree. A passing result only permits the activation change to
-begin; it does not register any tool/resource or prove the remaining forwarding,
-losslessness, client-discovery, wheel, and direct-Python/MCP equivalence gates.
+compatible range agree, and the wheel contains the research service modules
+and public operation exports. A passing result only permits the activation
+change to begin; it does not register any tool/resource or prove the remaining
+forwarding, losslessness, client-discovery, and direct-Python/MCP equivalence
+gates. The supplied wheel must be verified against the actual published file,
+not merely a local build with the same version number.

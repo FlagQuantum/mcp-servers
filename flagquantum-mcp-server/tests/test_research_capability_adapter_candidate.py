@@ -7,6 +7,7 @@ import os
 import runpy
 import subprocess
 import sys
+import zipfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -239,7 +240,7 @@ def test_activation_readiness_contract_is_fail_closed_and_non_activating() -> No
     }
 
 
-def test_activation_checker_accepts_only_a_complete_external_ready_state() -> None:
+def test_activation_checker_accepts_only_a_complete_external_ready_state(tmp_path: Path) -> None:
     assess = runpy.run_path(str(READINESS_CHECKER))["assess_prerequisites"]
     adapter = deepcopy(_candidate())
     adapter["upstream_contract"]["current_status"] = "approved_for_external_adapter"
@@ -260,7 +261,34 @@ def test_activation_checker_accepts_only_a_complete_external_ready_state() -> No
     }
     maturity = {"capabilities": {"research_capability_services": {"level": "production_supported"}}}
 
-    assert assess(adapter, upstream, maturity, "0.3.0", "Decision: approved") == []
+    wheel = tmp_path / "flagquantum-0.3.0-py3-none-any.whl"
+    operations = {tool["upstream_operation"] for tool in adapter["proposed_tools"]}
+    operations.update(adapter["upstream_schema_resource_operations"])
+    with zipfile.ZipFile(wheel, "w") as archive:
+        for module in (
+            "research_capabilities.py",
+            "research_execution.py",
+            "research_schemas.py",
+        ):
+            archive.writestr(f"flagquantum/services/{module}", "")
+        archive.writestr(
+            "flagquantum/services/__init__.py",
+            "__all__ = " + repr(tuple(sorted(operations))),
+        )
+
+    assert assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", wheel) == []
+
+    without_wheel = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved")
+    assert "an installed-compatible FlagQuantum wheel was not supplied" in without_wheel
+
+    old_wheel = tmp_path / "flagquantum-0.3.0rc3-py3-none-any.whl"
+    with zipfile.ZipFile(old_wheel, "w") as archive:
+        archive.writestr("flagquantum/services/__init__.py", "__all__ = ()")
+    blockers = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", old_wheel)
+    assert "wheel version does not match the recorded released version" in blockers
+    adapter["compatibility"]["released_flagquantum_version"] = "0.3.0rc3"
+    blockers = assess(adapter, upstream, maturity, "0.3.0", "Decision: approved", old_wheel)
+    assert any("wheel omits research service module" in blocker for blocker in blockers)
 
 
 def test_candidate_forwards_but_never_owns_provider_fallback() -> None:
@@ -566,8 +594,9 @@ print(json.dumps(results, sort_keys=True))
 
 def test_optional_activation_checker_reports_current_external_blockers() -> None:
     source_root = os.environ.get("FLAGQUANTUM_SOURCE_ROOT")
-    if source_root is None:
-        pytest.skip("set FLAGQUANTUM_SOURCE_ROOT for activation readiness")
+    wheel = os.environ.get("FLAGQUANTUM_WHEEL_PATH")
+    if source_root is None or wheel is None:
+        pytest.skip("set FLAGQUANTUM_SOURCE_ROOT and FLAGQUANTUM_WHEEL_PATH")
 
     completed = subprocess.run(
         [
@@ -575,6 +604,8 @@ def test_optional_activation_checker_reports_current_external_blockers() -> None
             str(READINESS_CHECKER),
             "--flagquantum-source-root",
             source_root,
+            "--flagquantum-wheel",
+            wheel,
         ],
         check=False,
         capture_output=True,
@@ -582,6 +613,11 @@ def test_optional_activation_checker_reports_current_external_blockers() -> None
     )
     result = json.loads(completed.stdout)
 
-    assert completed.returncode == 0
-    assert result["ready"] is True
-    assert result["blockers"] == []
+    if _candidate()["compatibility"]["released_flagquantum_version"] is None:
+        assert completed.returncode == 1
+        assert result["ready"] is False
+        assert "released FlagQuantum version is not recorded" in result["blockers"]
+    else:
+        assert completed.returncode == 0
+        assert result["ready"] is True
+        assert result["blockers"] == []
