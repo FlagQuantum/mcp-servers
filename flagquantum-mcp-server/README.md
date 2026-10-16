@@ -62,12 +62,14 @@ improve it.
 | `emit_qcis_tool` | QCIS text |
 | `draw_circuit_tool` | An ASCII diagram of the circuit |
 | `plan_execution_tool` | How would the SDK execute this — which mode, device, how much memory? |
+| `plan_evolution_tool` | Validate and size a continuous-time Lindblad evolution without running it |
 
 **Run**
 
 | Tool | What it answers |
 | --- | --- |
 | `simulate_circuit_tool` | Counts, samples, marginal probabilities or an expectation value from a local statevector run |
+| `evolve_dynamics_tool` | Time-resolved populations, observables and optional density matrices from local Lindblad evolution |
 | `train_parameters_tool` | The angles that lower a circuit's energy against a Pauli-sum Hamiltonian |
 
 Three resources: `flagquantum://version` (versions of the server, the SDK and
@@ -406,8 +408,9 @@ failed call leaves the session usable for the next one, which
   release 0.2.0 ships no remote-submission entry point, and this adapter adds
   none. The HTTP transport opens a listening socket and changes nothing about
   what a tool may do once a request arrives.
-- **No noise models.** A `NoiseModel` is a live SDK object rather than a
-  serializable value, and every tool here takes and returns JSON.
+- **No instruction-level `NoiseModel` objects.** Those are live SDK objects
+  rather than serializable values. Continuous-time evolution instead accepts
+  closed JSON collapse-operator descriptors with physical rates.
 - **No in-tree coupling.** This package must never be imported by the
   FlagQuantum repository. That project's long-horizon architecture contract
   names "the main repository has no production MCP transport dependency" as a
@@ -416,6 +419,15 @@ failed call leaves the session usable for the next one, which
   gateway out of tree is what that contract asks for.
 
 ## What it runs, and what that does not prove
+
+`plan_evolution_tool` and `evolve_dynamics_tool` use a separate continuous-time
+contract. A Hamiltonian and observables are Pauli-term lists, the initial state
+is a basis bitstring or dense state, times are explicit and strictly increasing,
+and amplitude damping is a physical rate in the Lindblad equation—not a channel
+probability. The execution tool returns one population row per requested time,
+trace drift, a bounded-population check, and numerical method/order/step-size/
+precision provenance. Both tools are deterministic, local CPU operations with
+no provider, credentials, hardware, or outbound network access.
 
 `simulate_circuit_tool` executes circuits in this process: a statevector
 simulation on CPU. That is the whole of it — no remote target, no provider, no

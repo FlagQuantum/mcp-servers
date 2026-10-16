@@ -57,6 +57,14 @@ TIER3_TRAINING = (
     ("flagquantum.algorithms", "pauli_term"),
 )
 
+TIER3_DYNAMICS = (
+    ("flagquantum.simulation", "EvolutionPlan"),
+    ("flagquantum.simulation", "EvolutionResult"),
+    ("flagquantum.simulation", "EvolutionValidationError"),
+    ("flagquantum.simulation", "evolve_density_matrix"),
+    ("flagquantum.simulation", "plan_density_matrix_evolution"),
+)
+
 # The analysis fields this server reports. Extra fields are fine; these are the
 # ones a prompt or an example may name.
 REQUIRED_ANALYSIS_FIELDS = frozenset(
@@ -142,6 +150,14 @@ def test_emitter_submodules_still_expose_their_functions(module_path: str, attri
 
 @pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)
 def test_training_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
+    module = importlib.import_module(module_path)
+
+    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
+    assert hasattr(module, attribute)
+
+
+@pytest.mark.parametrize(("module_path", "attribute"), TIER3_DYNAMICS)
+def test_dynamics_dependencies_are_still_declared_public(module_path: str, attribute: str) -> None:
     module = importlib.import_module(module_path)
 
     assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
