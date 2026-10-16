@@ -295,7 +295,7 @@ def _normalize_edges(edges: Sequence[Sequence[int]] | None, n_wires: int) -> lis
 def _describe_coupling_map(coupling_map: Any) -> dict[str, Any]:
     """Render a coupling map as a plain mapping."""
     return {
-        "n_wires": int(coupling_map.n_wires),
+        "n_wires": int(coupling_map.n_qubits),
         "n_edges": len(coupling_map.edges),
         "edges": [list(edge) for edge in coupling_map.edges],
     }

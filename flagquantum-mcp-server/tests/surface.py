@@ -39,6 +39,12 @@ EXPECTED_TOOLS = frozenset(
         "describe_topology_tool",
         "draw_circuit_tool",
         "train_parameters_tool",
+        "search_capabilities_tool",
+        "describe_capability_tool",
+        "estimate_capability_tool",
+        "validate_capability_input_tool",
+        "execute_local_capability_tool",
+        "validate_evidence_tool",
     }
 )
 
@@ -47,6 +53,14 @@ EXPECTED_RESOURCES = frozenset(
         "flagquantum://version",
         "flagquantum://gate-set",
         "flagquantum://ir-schema",
+        "flagquantum://capabilities/index",
+    }
+)
+
+EXPECTED_RESOURCE_TEMPLATES = frozenset(
+    {
+        "flagquantum://capabilities/{capability_id}/{version}",
+        "flagquantum://schemas/{schema_id}",
     }
 )
 

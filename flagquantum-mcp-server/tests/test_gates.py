@@ -325,9 +325,7 @@ def _markers_the_sdk_emits() -> set[str]:
     """Serialize one circuit per parameter kind, and collect the marker keys."""
     import flagquantum as fq
 
-    values: list[object] = [fq.Parameter("t"), 2 * fq.Parameter("t"), 1 + 2j]
-    torch = pytest.importorskip("torch", reason="the tensor marker needs torch")
-    values.append(torch.tensor(0.5))
+    values: list[object] = [fq.Parameter("t"), 2 * fq.Parameter("t")]
 
     markers: set[str] = set()
     for value in values:

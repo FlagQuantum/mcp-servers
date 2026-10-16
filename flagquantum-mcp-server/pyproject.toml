@@ -43,6 +43,8 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "build>=1.2",
+    "packaging>=24",
+    "tomli>=2; python_version < '3.11'",
 ]
 
 [tool.hatch.build.targets.wheel]

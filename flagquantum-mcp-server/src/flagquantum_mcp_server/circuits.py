@@ -44,12 +44,14 @@ IR_KIND = "flagquantum.circuit_ir"
 CircuitPayload = str | Mapping[str, Any] | Sequence[Any]
 
 # The parameter encodings the SDK's own decoder understands. A value mapping
-# that carries one of these keys becomes a live ``Parameter``,
-# ``ParameterExpression``, ``complex`` or tensor; a mapping that carries none of
-# them is kept as an opaque dict instead. That silent fall-through is how a
+# that carries one of these keys becomes a live ``Parameter`` or
+# ``ParameterExpression``. FlagQuantum 0.3 rejects complex and tensor gate
+# angles at construction, so they are not accepted by this gate-list boundary.
+# A mapping that carries neither symbolic key is kept as an opaque dict. That
+# silent fall-through is how a
 # misspelled marker turns a parameterized circuit into one that reports "no
 # parameters", so the input boundary rejects it rather than passing it on.
-VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression", "$complex", "$tensor")
+VALUE_MARKERS: tuple[str, ...] = ("$parameter", "$expression")
 
 # The key a gate's arbitrary unitary travels under, which differs by format:
 # the qir reader and the Python API call it ``gate``, and serialized IR calls it
@@ -303,13 +305,39 @@ def _ir_from_qir(decoded: Any) -> Any:
             "A gate list cannot be empty: the wire count is inferred from the "
             "highest index in the list, so an empty list describes no circuit."
         )
-    gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
     sdk = load_sdk()
+    gates = [_validate_gate(item, position) for position, item in enumerate(decoded)]
+    for gate in gates:
+        parameters = gate.get("parameters")
+        if not isinstance(parameters, Mapping):
+            continue
+        gate["parameters"] = {
+            name: _decode_parameter_value(value, sdk) for name, value in parameters.items()
+        }
     try:
         built = sdk.Circuit.from_qir(gates).to_ir()
         return sdk.CircuitIR.from_dict(built.to_dict())
     except (ValueError, TypeError, KeyError) as exc:
         raise ToolInputError(f"Gate list could not be built into a circuit: {exc}") from exc
+
+
+def _decode_parameter_value(value: Any, sdk: Any) -> Any:
+    """Decode the two symbolic angle encodings accepted by FlagQuantum 0.3."""
+
+    if not isinstance(value, Mapping):
+        return value
+    if "$parameter" in value:
+        return sdk.Parameter(value["$parameter"])
+    if "$expression" in value:
+        expression = value["$expression"]
+        assert isinstance(expression, Mapping)
+        args = expression["args"]
+        assert isinstance(args, list)
+        return sdk.ParameterExpression(
+            expression["op"],
+            tuple(_decode_parameter_value(argument, sdk) for argument in args),
+        )
+    return value
 
 
 def _validate_gate(gate: Any, position: int) -> dict[str, Any]:

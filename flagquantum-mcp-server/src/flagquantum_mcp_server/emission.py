@@ -55,7 +55,7 @@ def emit_openqasm(
     ir = resolve_ir(circuit, circuit_format)
     emit = load_attribute(OPENQASM_MODULE, OPENQASM_FUNCTION)
     wires = tuple(result_wires) if result_wires is not None else None
-    text = _emit(emit, ir, "OpenQASM", version=version, result_wires=wires)
+    text = _emit(emit, ir, "OpenQASM", version=version, result_qubits=wires)
     return _payload(text, "openqasm", f"{version:g}", ir)
 
 

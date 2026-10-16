@@ -1,0 +1,391 @@
+{
+  "schema": "flagquantum_mcp.research_capability_adapter_candidate.v1",
+  "status": "activated_local_research_surface",
+  "owner": "flagquantum-mcp-server",
+  "domain_authority": "flagquantum",
+  "upstream_contract": {
+    "proposal": "API_CHANGE_PROPOSAL_070_RESEARCH_CAPABILITY_SERVICES.md",
+    "machine_readable_contract": "contracts/research-capability-services-v1-candidate.json",
+    "namespace": "flagquantum.services",
+    "current_status": "approved_for_external_adapter",
+    "current_maturity": "production_supported",
+    "required_maturity_for_tool_registration": "production_supported",
+    "upstream_approval_token": "approve API_CHANGE_PROPOSAL_070_RESEARCH_CAPABILITY_SERVICES",
+    "upstream_approval_record_target": "docs/api-changes/FQ-RESEARCH-CAPABILITY-SERVICES-20261013.md",
+    "api_owner_approval_required": true,
+    "services_domain_owner_approval_required": true
+  },
+  "upstream_operations": [
+    "search_research_capabilities",
+    "describe_research_capability",
+    "estimate_research_capability",
+    "validate_research_capability_input",
+    "execute_research_capability",
+    "validate_research_evidence"
+  ],
+  "upstream_schema_resource_operations": [
+    "list_research_schemas",
+    "describe_research_schema"
+  ],
+  "proposed_tools": [
+    {
+      "name": "search_capabilities_tool",
+      "upstream_operation": "search_research_capabilities",
+      "adapter_scope": "decode structured query and serialize candidates",
+      "description": "Start here. Search the installed FlagQuantum capability catalog with a structured query; an empty query lists the bounded local research candidates. This tool discovers capabilities only and does not execute quantum work.",
+      "result_json_type": "array",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "object"
+          }
+        },
+        "required": [],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "describe_capability_tool",
+      "upstream_operation": "describe_research_capability",
+      "adapter_scope": "decode identity and serialize the versioned manifest",
+      "description": "Read the exact installed manifest before preparing a call. Use its request, result, validator, target, limitation, and schema identities; do not infer support from the tool description.",
+      "result_json_type": "object",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "capability_id"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "estimate_capability_tool",
+      "upstream_operation": "estimate_research_capability",
+      "adapter_scope": "decode typed request and serialize the upstream estimate",
+      "description": "Estimate the bounded request with FlagQuantum before execution. The returned resource estimate is authoritative for this capability; the MCP adapter adds no quantum cost model.",
+      "result_json_type": "object",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object"
+          },
+          "target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "capability_id",
+          "request"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "validate_capability_input_tool",
+      "upstream_operation": "validate_research_capability_input",
+      "adapter_scope": "decode typed request and preserve the upstream report",
+      "description": "Validate the complete typed request with FlagQuantum before execution. Continue only when the upstream report passes; MCP transport success is not an applicability decision.",
+      "result_json_type": "object",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability_id",
+          "request"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "execute_local_capability_tool",
+      "upstream_operation": "execute_research_capability",
+      "adapter_scope": "local execution only; forward provider order and fallback authorization verbatim; serialize evidence losslessly",
+      "description": "Execute one previously described, estimated, and validated capability on the bounded local CPU path only. Pass provider_order exactly and set allow_provider_fallback explicitly for more than one provider. Inspect the returned Evidence Bundle status and validators, then call validate_evidence_tool; transport success is not scientific success.",
+      "result_json_type": "object",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "request": {
+            "type": "object"
+          },
+          "options": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "capability_id",
+          "request"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "validate_evidence_tool",
+      "upstream_operation": "validate_research_evidence",
+      "adapter_scope": "decode evidence and preserve the upstream validation report",
+      "description": "Validate a returned Evidence Bundle with the installed FlagQuantum validator. Preserve the report for independent client or researcher acceptance; this tool does not turn transport completion into a scientific conclusion.",
+      "result_json_type": "object",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "validator_id": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "validator_id",
+          "evidence"
+        ],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "proposed_resources": [
+    {
+      "uri_template": "flagquantum://capabilities/index",
+      "upstream_operation": "search_research_capabilities",
+      "adapter_scope": "serialize the installed structured capability index"
+    },
+    {
+      "uri_template": "flagquantum://capabilities/{capability_id}/{version}",
+      "upstream_operation": "describe_research_capability",
+      "adapter_scope": "serialize the exact installed manifest"
+    },
+    {
+      "uri_template": "flagquantum://schemas/{schema_id}",
+      "upstream_operation": "describe_research_schema",
+      "adapter_scope": "serve the exact installed JSON Schema document without redefinition"
+    }
+  ],
+  "required_schema_identities": [
+    "flagquantum.pauli_sum.v1",
+    "flagquantum.ground_state_vqe_request.v1",
+    "flagquantum.ground_state_vqe_result.v1",
+    "flagquantum.exact_ground_state_request.v1",
+    "flagquantum.exact_sector_reference.v1",
+    "flagquantum.energy_variance_request.v1",
+    "flagquantum.energy_variance_reference.v1",
+    "flagquantum.research_capability_manifest.v1",
+    "flagquantum.research_validation_report.v1",
+    "flagquantum.research_capability_error.v1",
+    "flagquantum.research_capability_evidence_bundle.v1"
+  ],
+  "tool_response_envelope": {
+    "success_schema": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "success"
+        },
+        "result": {
+          "type": [
+            "object",
+            "array"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "error_schema": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "const": "error"
+        },
+        "error": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "status",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "result_policy": "serialize the exact upstream operation result under result without field omission or renaming, including every embedded structured domain error field",
+    "error_policy": "the error envelope is only for adapter or pre-result public API exceptions; domain errors returned inside reports or Evidence Bundles remain in success results",
+    "domain_failure_policy": "an upstream Evidence Bundle with failed, validation_failed, or unsupported status remains a transport-success result and is never rewritten as an MCP transport error"
+  },
+  "protocol_exception_mapping": {
+    "rules": [
+      {
+        "python_exceptions": [
+          "KeyError",
+          "TypeError",
+          "ValueError"
+        ],
+        "code": "INVALID_INPUT",
+        "message_policy": "use the public API exception message"
+      },
+      {
+        "python_exceptions": [
+          "ImportError",
+          "ModuleNotFoundError"
+        ],
+        "code": "SDK_UNAVAILABLE",
+        "message_policy": "report that the installed FlagQuantum SDK is unavailable"
+      }
+    ],
+    "unexpected_exception_code": "INTERNAL_ERROR",
+    "unexpected_exception_message": "FlagQuantum research capability call failed",
+    "never_catch": [
+      "KeyboardInterrupt",
+      "SystemExit",
+      "GeneratorExit"
+    ]
+  },
+  "agent_workflow": {
+    "ordered_tools": [
+      "search_capabilities_tool",
+      "describe_capability_tool",
+      "estimate_capability_tool",
+      "validate_capability_input_tool",
+      "execute_local_capability_tool",
+      "validate_evidence_tool"
+    ],
+    "required_decisions": [
+      "select an exact installed capability id and version from discovery",
+      "use the installed manifest and schema resources rather than inferred fields",
+      "stop when estimation or input validation does not pass",
+      "keep execution local and credential-free",
+      "authorize every provider and unavailable-only fallback explicitly",
+      "treat Evidence Bundle validators and independent client policy as scientific gates"
+    ],
+    "prompt_is_not_authority": true
+  },
+  "required_provider_routing": {
+    "capability_scope": [
+      "ground_state.solve.vqe"
+    ],
+    "default_provider_order": [
+      "flagquantum-native"
+    ],
+    "multiple_providers_require_authorization": true,
+    "fallback_trigger": "provider_unavailable_only",
+    "ordinary_execution_failure_triggers_fallback": false,
+    "scientific_validation_failure_triggers_fallback": false,
+    "installed_external_providers": [
+      "qiskit-aer",
+      "pennylane-lightning"
+    ],
+    "candidate_scoring": "caller_order_rank_without_reordering",
+    "route_explanation_is_content_hashed": true,
+    "provider_backend_execution_estimate": true
+  },
+  "compatibility": {
+    "current_package_range": "flagquantum>=0.2,<0.3",
+    "released_flagquantum_version": null,
+    "candidate_range": null,
+    "activation_condition": "a published FlagQuantum wheel contains the approved research service API and an adapter wheel is verified against it",
+    "version_mismatch_behavior": "fail_closed"
+  },
+  "activation_readiness_contract": {
+    "approved_upstream_status": "approved_for_external_adapter",
+    "approved_owner_value": "approved",
+    "approval_record_marker": "Decision: approved",
+    "allowed_maturity": [
+      "production_supported",
+      "release_certified"
+    ],
+    "checker": "tools/check_research_adapter_prerequisites.py",
+    "scope": "read-only external prerequisites; passing does not register tools or prove adapter equivalence"
+  },
+  "adapter_invariants": {
+    "structured_queries_only": true,
+    "preserve_upstream_defaults": true,
+    "preserve_all_evidence_fields": true,
+    "preserve_upstream_domain_error_fields_inside_results": true,
+    "protocol_exceptions_use_repository_error_codes": true,
+    "schema_documents_come_from_installed_flagquantum": true,
+    "no_schema_copy_or_redefinition": true,
+    "no_domain_validation": true,
+    "no_resource_estimation": true,
+    "no_scientific_validation": true,
+    "no_provider_routing": true,
+    "no_candidate_scoring": true,
+    "no_provider_dependency_probe": true,
+    "no_provider_sdk_dependency": true,
+    "forward_provider_order_verbatim": true,
+    "forward_fallback_authorization_verbatim": true,
+    "preserve_attempt_order_and_provider_errors": true,
+    "preserve_provider_route_explanation": true,
+    "closed_status_result_or_error_envelope": true,
+    "no_adapter_retry_or_fallback": true,
+    "no_network_egress": true,
+    "no_credentials": true,
+    "no_remote_or_paid_execution": true
+  },
+  "existing_overlap": [
+    {
+      "path": "src/flagquantum_mcp_server/planning.py",
+      "symbols": [
+        "validate_pauli_terms"
+      ],
+      "disposition": "retain for existing generic planning and training tools; capability adapters must not call or extend it"
+    },
+    {
+      "path": "src/flagquantum_mcp_server/training.py",
+      "symbols": [
+        "hamiltonian_from_terms",
+        "_check_budget"
+      ],
+      "disposition": "retain for the existing generic training tool; capability adapters use upstream typed requests and estimates"
+    },
+    {
+      "path": "src/flagquantum_mcp_server/limits.py",
+      "symbols": [
+        "max_hamiltonian_terms",
+        "max_train_seconds"
+      ],
+      "disposition": "retain protocol safety limits only; never translate them into scientific resource estimates"
+    }
+  ],
+  "activation_gates": [
+    "upstream API proposal approved",
+    "upstream maturity is production_supported or release_certified",
+    "released FlagQuantum version range identified",
+    "tier declaration added to tests/test_api_contract.py",
+    "parameter and default forwarding contract passes",
+    "evidence and error losslessness contract passes",
+    "installed schema-resource parity contract passes",
+    "provider routing and fallback forwarding contract passes",
+    "direct Python and MCP results are equivalent",
+    "no research capability tool is registered before every gate passes"
+  ]
+}

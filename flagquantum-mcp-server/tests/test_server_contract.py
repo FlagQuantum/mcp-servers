@@ -14,7 +14,12 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ValidationError
 
 from flagquantum_mcp_server.server import mcp
-from tests.surface import EXPECTED_PROMPTS, EXPECTED_RESOURCES, EXPECTED_TOOLS
+from tests.surface import (
+    EXPECTED_PROMPTS,
+    EXPECTED_RESOURCE_TEMPLATES,
+    EXPECTED_RESOURCES,
+    EXPECTED_TOOLS,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -28,6 +33,12 @@ async def test_every_expected_tool_is_registered() -> None:
     tools = await mcp.list_tools()
 
     assert {tool.name for tool in tools} == EXPECTED_TOOLS
+
+
+async def test_every_expected_resource_template_is_registered() -> None:
+    templates = await mcp.list_resource_templates()
+
+    assert {template.uri_template for template in templates} == EXPECTED_RESOURCE_TEMPLATES
 
 
 async def test_tools_are_declared_read_only_and_closed_world() -> None:
@@ -51,6 +62,12 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
         "deserialize_circuit_tool",
         "describe_topology_tool",
         "describe_gate_set_tool",
+        "search_capabilities_tool",
+        "describe_capability_tool",
+        "estimate_capability_tool",
+        "validate_capability_input_tool",
+        "execute_local_capability_tool",
+        "validate_evidence_tool",
     }
 
     for name, tool in tools.items():
@@ -82,6 +99,12 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
                 "deserialize_circuit_tool",
                 "describe_topology_tool",
                 "describe_gate_set_tool",
+                "search_capabilities_tool",
+                "describe_capability_tool",
+                "estimate_capability_tool",
+                "validate_capability_input_tool",
+                "execute_local_capability_tool",
+                "validate_evidence_tool",
             }, name
             continue
         schema = properties["circuit_format"]
@@ -198,7 +221,10 @@ async def test_resources_return_parseable_json() -> None:
     for uri in EXPECTED_RESOURCES:
         result = await mcp.read_resource(uri)
         payload = json.loads(result.contents[0].content)
-        assert isinstance(payload, dict)
+        if uri == "flagquantum://capabilities/index":
+            assert isinstance(payload, list)
+        else:
+            assert isinstance(payload, dict)
 
 
 async def test_gate_set_resource_matches_the_sdk() -> None:
@@ -283,7 +309,7 @@ async def test_tool_descriptions_publish_what_a_caller_cannot_infer(tool: str, p
 
 
 async def test_every_execution_mode_the_description_names_actually_runs(bell_qir: str) -> None:
-    """The description offers five engines, so all five have to work.
+    """Every dependency-free engine runs; the optional engine fails explicitly.
 
     Naming an engine is a promise about what the tool accepts, and nothing else
     in the suite reads the mode list: a mode can stop being accepted upstream,
@@ -308,7 +334,7 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
     # appeared in the provenance sentence. Splitting on the offer's own wording
     # is what closes that, and requiring the marker makes a reword fail loudly
     # instead of silently widening the window to the whole text.
-    offer = description.split("and all five the SDK offers are reachable")
+    offer = description.split("All five dependency-free modes are reachable")
     assert len(offer) == 2, "the description no longer offers the modes in one place"
     offered = set(re.findall(r'"([a-z_]+)"', offer[1].split(";", 1)[0]))
 
@@ -327,17 +353,30 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
     modes = [name.strip() for name in error["message"].split("mode must be one of:")[1].split(",")]
 
     async def probabilities(mode: str) -> list[float]:
+        outputs = (
+            [{"kind": "counts", "wires": [0, 1], "shots": 256}]
+            if mode == "stabilizer"
+            else [{"kind": "probabilities", "wires": [0, 1]}]
+        )
         result = await mcp.call_tool(
             "simulate_circuit_tool",
             {
                 "circuit": bell_qir,
                 "circuit_format": "qir",
-                "options": {"mode": mode},
-                "outputs": [{"kind": "probabilities", "wires": [0, 1]}],
+                "options": {
+                    "mode": mode,
+                    **({"shots": 256} if mode == "stabilizer" else {}),
+                },
+                "outputs": outputs,
             },
         )
         payload = result.structured_content
         assert payload is not None, mode
+        if mode == "stabilizer" and payload["status"] == "error":
+            assert payload["error"]["code"] == "INVALID_INPUT"
+            assert "optional dependency" in payload["error"]["message"]
+            assert "flagquantum[stim]" in payload["error"]["message"]
+            return []
         assert payload["status"] == "success", payload
         execution = payload["execution"]
         # "auto" is a request the SDK resolves, not a name it echoes back:
@@ -355,14 +394,32 @@ async def test_every_execution_mode_the_description_names_actually_runs(bell_qir
         assert execution["platform_provider"] == ("pytorch_cpu" if statevector_run else ""), (
             execution
         )
-        return payload["outputs"][0]["value"]
+        value = payload["outputs"][0]["value"]
+        if mode == "stabilizer":
+            assert set(value) <= {"00", "11"}
+            assert sum(value.values()) == 256
+            return []
+        return value
 
     reference = await probabilities("statevector")
 
-    assert set(modes) == {"auto", "density_matrix", "mps", "statevector", "tensor_network"}
-    assert set(modes) <= offered, f"the offer does not name {sorted(set(modes) - offered)}"
+    assert set(modes) == {
+        "auto",
+        "density_matrix",
+        "mps",
+        "stabilizer",
+        "statevector",
+        "tensor_network",
+    }
+    dependency_free = set(modes) - {"stabilizer"}
+    assert dependency_free <= offered, (
+        f"the offer does not name {sorted(dependency_free - offered)}"
+    )
+    assert '"stabilizer"' in description
     for mode in modes:
-        assert await probabilities(mode) == pytest.approx(reference, abs=1e-6), mode
+        observed = await probabilities(mode)
+        if mode != "stabilizer":
+            assert observed == pytest.approx(reference, abs=1e-6), mode
 
 
 async def test_no_tool_hides_its_only_documentation_in_a_returns_section() -> None:
