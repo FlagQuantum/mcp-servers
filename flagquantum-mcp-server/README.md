@@ -571,6 +571,31 @@ The dependency is pinned to `flagquantum>=0.2,<0.3`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that
 installs a different upstream revision unresolvable.
 
+### Capability coverage decisions
+
+[`contracts/sdk-capability-coverage-v1.json`](contracts/sdk-capability-coverage-v1.json)
+records a decision for every production-supported or release-certified
+capability in the pinned FlagQuantum v0.3.0 source manifest. A decision either
+names this server's bounded tool surface or explains why no tool is exposed.
+The one existing drawing tool is recorded separately as a legacy experimental
+exception; the ledger does not authorize adding other experimental tools.
+The CI checker compares these decisions to the pinned upstream
+`capability-maturity.toml` and to the server's declared tool surface. A new
+eligible capability or MCP tool without a decision fails the check.
+
+This ledger is an **exposure audit**, not a claim that every Python function is
+available over MCP. Nor is it installed-package compatibility evidence: the
+pinned v0.3.0 source is newer than this server's current `flagquantum>=0.2,<0.3`
+dependency. A compatible core wheel, dependency update, and clean installed
+MCP handshake still need separate verification before new tools can be released.
+
+To inspect the pinned source locally, check out commit
+`f0d936b9fe47f0dad1c17d72ac94d596df993a37` of FlagQuantum and run:
+
+```bash
+python tools/check_capability_coverage.py --upstream-root /path/to/FlagQuantum
+```
+
 ## Development
 
 ```bash
