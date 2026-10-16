@@ -124,7 +124,7 @@ def describe_topology(
         "status": "success",
         "topology": {
             "kind": topology,
-            "n_wires": int(coupling_map.n_wires),
+            "n_wires": int(coupling_map.n_qubits),
             "n_edges": len(edges_out),
             "edges": edges_out,
         },

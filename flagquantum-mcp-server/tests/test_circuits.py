@@ -531,7 +531,7 @@ def test_ir_still_accepts_a_list_of_wires() -> None:
 
 def test_an_absent_wires_key_is_left_to_the_sdk() -> None:
     """Absent is not the same as null, and the SDK's message for absent is good."""
-    with pytest.raises(ToolInputError, match="requires at least one wire"):
+    with pytest.raises(ToolInputError, match="requires at least one qubit"):
         resolve_ir(_with_instruction({"opcode": "h", "params": {}}), IR_FORMAT)
 
 
@@ -590,7 +590,7 @@ def test_a_dtype_the_sdk_cannot_build_with_is_an_input_error(dtype: str) -> None
 
 
 def test_a_dtype_torch_does_not_have_names_the_field() -> None:
-    with pytest.raises(ToolInputError, match="'dtype' field is the most likely cause"):
+    with pytest.raises(ToolInputError, match="IR dtype 'nonsense' is not supported"):
         analyze(_ir_payload(dtype="nonsense"), IR_FORMAT)
 
 
