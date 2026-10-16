@@ -32,6 +32,7 @@ COMPILER_MODULE = "flagquantum.compiler"
 ROUTING_STRATEGIES: tuple[str, ...] = ("restore_after_each_gate", "persistent_layout")
 TOPOLOGY_KINDS: tuple[str, ...] = ("line", "ring", "grid", "custom")
 TOPOLOGY_RENDERERS: tuple[str, ...] = ("line", "ring", "grid")
+COMPILE_TOPOLOGIES: tuple[str, ...] = ("none", *TOPOLOGY_KINDS)
 
 # Every coupling-map edge names exactly two wires.
 EDGE_ARITY = 2
@@ -63,6 +64,117 @@ def optimize_circuit(
         **_delta(before, after),
         **_ir_block(after),
     }
+
+
+def compile_circuit(
+    circuit: CircuitPayload,
+    circuit_format: CircuitFormat = "ir",
+    *,
+    topology: str = "none",
+    rows: int | None = None,
+    cols: int | None = None,
+    edges: Sequence[Sequence[int]] | None = None,
+    routing_strategy: str = "restore_after_each_gate",
+    optimize: bool = True,
+) -> dict[str, Any]:
+    """Run the SDK's complete local compiler pipeline in one call.
+
+    Args:
+        circuit: Serialized circuit, as JSON text or a decoded payload.
+        circuit_format: Either ``"ir"`` or ``"qir"``.
+        topology: ``"none"`` for target-independent compilation, or
+            ``"line"``, ``"ring"``, ``"grid"`` or ``"custom"`` to route.
+        rows: Grid rows, required with ``topology="grid"`` when the shape
+            should not be derived.
+        cols: Grid columns; see ``rows``.
+        edges: Explicit wire pairs, required with ``topology="custom"``.
+        routing_strategy: ``"restore_after_each_gate"`` or
+            ``"persistent_layout"``.
+        optimize: Whether to run target-independent optimizations.
+
+    Returns:
+        The compiled canonical IR, its before/after analyses, the stages that
+        ran and the coupling map when one was requested.
+
+    Raises:
+        ToolError: If the circuit, topology or routing strategy is invalid.
+    """
+    before = resolve_ir(circuit, circuit_format)
+    resolved_strategy = _strategy(routing_strategy)
+    coupling_map = _compile_coupling_map(
+        topology,
+        n_wires=int(before.n_wires),
+        rows=rows,
+        cols=cols,
+        edges=edges,
+    )
+    if coupling_map is None and routing_strategy != ROUTING_STRATEGIES[0]:
+        raise ToolInputError(
+            "topology='none' cannot use a non-default routing_strategy. Choose "
+            "a topology to route, or omit routing_strategy."
+        )
+    compile_program = load_attribute(COMPILER_MODULE, "compile")
+    after = compile_program(
+        before,
+        coupling_map=coupling_map,
+        routing_strategy=resolved_strategy,
+        optimize=optimize,
+    )
+    stages = (["optimize"] if optimize else []) + (
+        ["route_to_topology"] if coupling_map is not None else []
+    )
+    return {
+        "status": "success",
+        "transformation": "compile",
+        "stages": stages,
+        "topology": (None if coupling_map is None else _describe_coupling_map(coupling_map)),
+        "routing_strategy": routing_strategy,
+        "optimize": optimize,
+        "before": summarize_ir(before),
+        "after": summarize_ir(after),
+        **_delta(before, after),
+        **_ir_block(after),
+    }
+
+
+def _compile_coupling_map(
+    topology: str,
+    *,
+    n_wires: int,
+    rows: int | None,
+    cols: int | None,
+    edges: Sequence[Sequence[int]] | None,
+) -> Any | None:
+    """Resolve the optional topology without silently ignoring its fields."""
+    if topology not in COMPILE_TOPOLOGIES:
+        raise UnsupportedFormatError(
+            f"topology must be one of {list(COMPILE_TOPOLOGIES)}; received {topology!r}."
+        )
+    if topology == "none":
+        supplied = {
+            name: value
+            for name, value in (("rows", rows), ("cols", cols), ("edges", edges))
+            if value is not None
+        }
+        if supplied:
+            raise ToolInputError(
+                f"topology='none' cannot use {sorted(supplied)}. Choose a "
+                "topology that consumes those fields, or omit them."
+            )
+        return None
+    unused = {
+        "line": (("rows", rows), ("cols", cols), ("edges", edges)),
+        "ring": (("rows", rows), ("cols", cols), ("edges", edges)),
+        "grid": (("edges", edges),),
+        "custom": (("rows", rows), ("cols", cols)),
+    }[topology]
+    supplied_fields = sorted(name for name, value in unused if value is not None)
+    if supplied_fields:
+        raise ToolInputError(
+            f"topology={topology!r} cannot use {supplied_fields}. Omit fields that "
+            "belong to a different topology."
+        )
+    return build_coupling_map(topology, n_wires=n_wires, rows=rows, cols=cols, edges=edges)
 
 
 def route_circuit(

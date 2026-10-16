@@ -26,6 +26,7 @@ EXPECTED_TOOLS = frozenset(
         "serialize_circuit_tool",
         "deserialize_circuit_tool",
         "optimize_circuit_tool",
+        "compile_circuit_tool",
         "route_circuit_tool",
         "compare_topologies_tool",
         "emit_openqasm_tool",
