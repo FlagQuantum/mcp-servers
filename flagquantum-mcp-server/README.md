@@ -580,7 +580,7 @@ Whether the Hamiltonian reaches the run is decided by
 `tests/test_api_contract.py` pins that default too rather than trusting the
 snapshot to carry it.
 
-The dependency is pinned to `flagquantum>=0.2,<0.3`. It is a version range,
+The dependency is pinned to `flagquantum>=0.3,<0.4`. It is a version range,
 never a git URL: a URL in the dependency table makes every environment that
 installs a different upstream revision unresolvable.
 
@@ -597,10 +597,10 @@ The CI checker compares these decisions to the pinned upstream
 eligible capability or MCP tool without a decision fails the check.
 
 This ledger is an **exposure audit**, not a claim that every Python function is
-available over MCP. Nor is it installed-package compatibility evidence: the
-pinned v0.3.0 source is newer than this server's current `flagquantum>=0.2,<0.3`
-dependency. A compatible core wheel, dependency update, and clean installed
-MCP handshake still need separate verification before new tools can be released.
+available over MCP. It does not replace installed-package compatibility tests:
+the current `flagquantum>=0.3,<0.4` dependency is verified separately by the
+test matrix and clean installed-wheel MCP handshake. A source mapping alone
+does not authorize a new tool or prove a future FlagQuantum release works.
 
 To inspect the pinned source locally, check out commit
 `f0d936b9fe47f0dad1c17d72ac94d596df993a37` of FlagQuantum and run:

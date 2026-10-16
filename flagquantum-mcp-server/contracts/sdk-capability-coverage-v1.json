@@ -6,7 +6,7 @@
     "commit": "f0d936b9fe47f0dad1c17d72ac94d596df993a37",
     "manifest": "capability-maturity.toml"
   },
-  "scope": "Coverage decisions for release-certified and production-supported upstream capabilities. A mapping documents a bounded MCP tool surface, not full parity with every Python API. This source release is newer than the server's current SDK dependency range, so this ledger is not installed-package compatibility evidence.",
+  "scope": "Coverage decisions for release-certified and production-supported upstream capabilities. A mapping documents a bounded MCP tool surface, not full parity with every Python API or independent installed-package compatibility evidence.",
   "capabilities": {
     "ir": {
       "disposition": "mapped",
