@@ -53,9 +53,7 @@ def import_openqasm(source: str, *, indent: int | None = None) -> dict[str, Any]
             the canonical subset. The message carries the importer's issue code.
     """
     if not isinstance(source, str):
-        raise ToolInputError(
-            f"OpenQASM source must be a string; received {type(source).__name__}."
-        )
+        raise ToolInputError(f"OpenQASM source must be a string; received {type(source).__name__}.")
     if len(source) > limits.max_qasm_chars():
         raise ToolLimitError(
             f"OpenQASM source is {len(source)} characters, above the "

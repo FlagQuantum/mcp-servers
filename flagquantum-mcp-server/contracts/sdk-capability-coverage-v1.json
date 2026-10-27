@@ -51,9 +51,10 @@
     "openqasm_interchange": {
       "disposition": "mapped",
       "tools": [
-        "emit_openqasm_tool"
+        "emit_openqasm_tool",
+        "import_openqasm_tool"
       ],
-      "scope": "OpenQASM emission only; import is not exposed as an MCP tool."
+      "scope": "OpenQASM interchange in both directions: emission, and import of the canonical subset the emitters write. Import refuses text outside that subset rather than approximating it."
     },
     "sharded_statevector_training": {
       "disposition": "deferred",

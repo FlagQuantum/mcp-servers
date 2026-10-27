@@ -186,9 +186,7 @@ def test_qasm_import_dependencies_are_still_declared_public(
 
 def test_imported_program_still_exposes_the_fields_the_tool_reports() -> None:
     """The tool reports these, so their disappearance must fail here, not in a call."""
-    program = importlib.import_module(
-        "flagquantum.compiler.openqasm_import"
-    ).import_openqasm(
+    program = importlib.import_module("flagquantum.compiler.openqasm_import").import_openqasm(
         'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;\n'
         "h q[0];\ncx q[0], q[1];\nc = measure q;"
     )

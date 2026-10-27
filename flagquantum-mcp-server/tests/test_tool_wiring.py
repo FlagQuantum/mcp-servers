@@ -337,9 +337,7 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
         )
     ],
     "emit_qcis_tool": [({"circuit": GHZ, "circuit_format": "qir"}, _emitted_qcis)],
-    "import_openqasm_tool": [
-        ({"source": BELL_QASM3, "indent": 2}, _imported_openqasm)
-    ],
+    "import_openqasm_tool": [({"source": BELL_QASM3, "indent": 2}, _imported_openqasm)],
     "plan_execution_tool": [
         (
             {

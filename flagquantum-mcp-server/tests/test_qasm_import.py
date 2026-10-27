@@ -147,7 +147,7 @@ def test_foreign_openqasm_is_refused_rather_than_rewritten() -> None:
 
 
 def test_refusal_names_the_offending_line() -> None:
-    source = 'OPENQASM 3.0;\nqubit[1] q;\nh q[0];'
+    source = "OPENQASM 3.0;\nqubit[1] q;\nh q[0];"
 
     with pytest.raises(UnsupportedFormatError) as excinfo:
         import_openqasm(source)
