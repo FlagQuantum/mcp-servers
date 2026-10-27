@@ -157,6 +157,20 @@ def _emitted_qcis(payload: dict[str, Any]) -> None:
     assert "measure" not in payload["text"].lower()
 
 
+BELL_QASM3 = (
+    'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;\n'
+    "h q[0];\ncx q[0], q[1];\nc = measure q;"
+)
+
+
+def _imported_openqasm(payload: dict[str, Any]) -> None:
+    assert payload["status"] == "success"
+    assert payload["qasm_version"] == "3"
+    assert payload["opcodes"] == ["h", "cx"]
+    assert payload["n_qubits"] == 2
+    assert json.loads(payload["ir_json"])["kind"] == "flagquantum.circuit_ir"
+
+
 def _planned_with_shots(payload: dict[str, Any]) -> None:
     # A counts output is rejected unless a shot count reaches the planner, so a
     # dropped `options` surfaces as an error rather than a silently different
@@ -323,6 +337,9 @@ CASES: dict[str, list[tuple[dict[str, Any], Check]]] = {
         )
     ],
     "emit_qcis_tool": [({"circuit": GHZ, "circuit_format": "qir"}, _emitted_qcis)],
+    "import_openqasm_tool": [
+        ({"source": BELL_QASM3, "indent": 2}, _imported_openqasm)
+    ],
     "plan_execution_tool": [
         (
             {

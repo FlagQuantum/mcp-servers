@@ -60,6 +60,7 @@ async def test_circuit_tools_take_a_circuit_and_a_format() -> None:
     tools = {tool.name: tool for tool in await mcp.list_tools()}
     circuitless = {
         "deserialize_circuit_tool",
+        "import_openqasm_tool",
         "describe_topology_tool",
         "describe_gate_set_tool",
         "search_capabilities_tool",
@@ -99,6 +100,7 @@ async def test_circuit_format_is_a_closed_enum_not_a_free_string() -> None:
         if "circuit_format" not in properties:
             assert name in {
                 "deserialize_circuit_tool",
+                "import_openqasm_tool",
                 "describe_topology_tool",
                 "describe_gate_set_tool",
                 "search_capabilities_tool",

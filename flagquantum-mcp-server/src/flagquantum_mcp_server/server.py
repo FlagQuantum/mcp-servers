@@ -45,6 +45,7 @@ from flagquantum_mcp_server.errors import (
 from flagquantum_mcp_server.gates import gate_records
 from flagquantum_mcp_server.parameters import bind_parameters, inspect_parameters
 from flagquantum_mcp_server.planning import plan_execution
+from flagquantum_mcp_server.qasm_import import import_openqasm
 from flagquantum_mcp_server.research_capabilities import (
     call_research_operation,
     research_internal_error,
@@ -61,7 +62,9 @@ planned locally on CPU, with no credentials and no network access.
 A typical session:
 1. Build a circuit as a gate list and canonicalize it with
    serialize_circuit_tool (circuit_format="qir"), or bring an existing
-   circuit in FlagQuantum IR JSON (circuit_format="ir").
+   circuit in FlagQuantum IR JSON (circuit_format="ir"). Text another tool
+   produced as OpenQASM goes through import_openqasm_tool first — it answers
+   in IR, so the rest of this list applies unchanged.
 2. Call analyze_circuit_tool to see gate counts and depth.
 3. Call compile_circuit_tool to optimize and optionally route in one pass, or
    compare_topologies_tool first when the connectivity has not been chosen.
@@ -445,6 +448,34 @@ def emit_qcis_tool(circuit: str, circuit_format: CircuitFormat = "ir") -> dict[s
         matrix gate returns an error, because QCIS cannot express one.
     """
     return emit_qcis(circuit, circuit_format)
+
+
+@mcp.tool(annotations=READ_ONLY)
+@_structured_errors
+def import_openqasm_tool(source: str, indent: int | None = None) -> dict[str, Any]:
+    """Import OpenQASM 2 or 3 text as FlagQuantum IR.
+
+    This is the inverse of emit_openqasm_tool: it turns OpenQASM text back into
+    the ``ir`` form that compile_circuit_tool, route_circuit_tool and the other
+    circuit tools accept, so an exported circuit can be fed back in without
+    being rebuilt by hand.
+
+    It reads the canonical subset FlagQuantum's own emitters write, which is
+    why a round trip is exact. Text from another toolchain may be refused with
+    code UNSUPPORTED_FORMAT and the importer's own message naming the statement
+    and line; that is a property of the input, not a server fault, and the text
+    is not silently rewritten to fit.
+
+    Args:
+        source: The complete text of one OpenQASM program.
+        indent: Optional indentation width for the returned IR JSON.
+
+    Returns:
+        The canonical IR JSON (pass it on with circuit_format="ir"), its content
+        hash and IR version, the qubit count, the imported opcodes in order,
+        the measured qubits, and whether the source measured a whole register.
+    """
+    return import_openqasm(source, indent=indent)
 
 
 @mcp.tool(annotations=READ_ONLY)
