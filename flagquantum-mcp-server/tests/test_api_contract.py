@@ -51,6 +51,16 @@ TIER3_EMITTERS = (
     ("flagquantum.compiler.qcis", "emit_qcis"),
 )
 
+# Tier 3: the OpenQASM importer, which has its own __all__ but is not in the
+# frozen snapshot. It is the only way to turn emitted text back into a circuit,
+# so import_openqasm_tool rests on it; the names below are the ones that module
+# reads, including the refusal type it catches by name.
+TIER3_QASM_IMPORT = (
+    ("flagquantum.compiler.openqasm_import", "import_openqasm"),
+    ("flagquantum.compiler.openqasm_import", "OpenQASMImportError"),
+    ("flagquantum.compiler.openqasm_import", "OpenQASMImport"),
+)
+
 # Tier 3: public names a package declares in its own __all__, not in the frozen
 # snapshot. The training objective needs both, and there is no other way to say
 # what to minimise — see docs/superpowers/specs/2026-09-18-parameter-training-design.md.
@@ -162,6 +172,29 @@ def test_emitter_submodules_still_expose_their_functions(module_path: str, attri
     module = importlib.import_module(module_path)
 
     assert hasattr(module, attribute), f"{module_path}.{attribute} disappeared"
+
+
+@pytest.mark.parametrize(("module_path", "attribute"), TIER3_QASM_IMPORT)
+def test_qasm_import_dependencies_are_still_declared_public(
+    module_path: str, attribute: str
+) -> None:
+    module = importlib.import_module(module_path)
+
+    assert attribute in module.__all__, f"{module_path} no longer declares {attribute}"
+    assert hasattr(module, attribute)
+
+
+def test_imported_program_still_exposes_the_fields_the_tool_reports() -> None:
+    """The tool reports these, so their disappearance must fail here, not in a call."""
+    program = importlib.import_module("flagquantum.compiler.openqasm_import").import_openqasm(
+        'OPENQASM 3.0;\ninclude "stdgates.inc";\nqubit[2] q;\nbit[2] c;\n'
+        "h q[0];\ncx q[0], q[1];\nc = measure q;"
+    )
+
+    for field in ("instructions", "measurement_qubits", "n_qubits", "n_wires", "version"):
+        assert hasattr(program, field), f"OpenQASMImport.{field} disappeared"
+    assert hasattr(program, "to_ir")
+    assert isinstance(program.whole_register_measurement, bool)
 
 
 @pytest.mark.parametrize(("module_path", "attribute"), TIER3_TRAINING)

@@ -61,6 +61,7 @@ validation.
 | Tool | What it answers |
 | --- | --- |
 | `emit_openqasm_tool` | OpenQASM 2.0 or 3.0 text |
+| `import_openqasm_tool` | FlagQuantum IR from OpenQASM text — the inverse of `emit_openqasm_tool` |
 | `emit_qcis_tool` | QCIS text |
 | `draw_circuit_tool` | An ASCII diagram of the circuit |
 | `plan_execution_tool` | How would the SDK execute this — which mode, device, how much memory? |
@@ -362,6 +363,21 @@ does not — a Bell circuit with no `measurements` still emits `c = measure q;`.
 Declaring measurements in the source IR changes nothing: the emitted text is
 chosen by `result_wires` alone. The `content_hash` in the result identifies the
 **source circuit**, not the emitted text. `emit_qcis_tool` appends nothing.
+
+### On imported text
+
+`import_openqasm_tool` reads the canonical subset FlagQuantum's own emitters
+write, and refuses the rest with `UNSUPPORTED_FORMAT` and the importer's own
+message naming the statement and line. It is not a general OpenQASM front end:
+text from another toolchain may be refused rather than approximated, and a
+program is never silently rewritten to fit.
+
+The round trip is faithful to the **text**, not to the source circuit. Because
+`emit_openqasm_tool` adds a measurement the source circuit never had, importing
+its output yields a circuit that measures. Its `content_hash` therefore differs
+from the emitter's, which describes the source. Import twice and the hash is
+stable; import what you emitted and the gate sequence matches, the measurement
+is new.
 
 ### On `content_hash`
 

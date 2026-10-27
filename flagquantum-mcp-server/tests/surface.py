@@ -31,6 +31,7 @@ EXPECTED_TOOLS = frozenset(
         "compare_topologies_tool",
         "emit_openqasm_tool",
         "emit_qcis_tool",
+        "import_openqasm_tool",
         "plan_execution_tool",
         "simulate_circuit_tool",
         "plan_evolution_tool",
